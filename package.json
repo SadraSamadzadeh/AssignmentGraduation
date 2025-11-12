@@ -18,7 +18,10 @@
   "homepage": "https://github.com/SadraSamadzadeh/AssignmentGraduation#readme",
   "description": "",
   "dependencies": {
+    "@types/node": "^24.10.1",
     "express": "^5.1.0",
-    "nodemon": "^3.1.11"
+    "nodemon": "^3.1.11",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
   }
 }

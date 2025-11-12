@@ -56,7 +56,7 @@ See `QUICK_TEST.md` for detailed testing instructions.
 
 ## Architecture
 
-- **Models**: Eloquent ORM (TrackingMatch, VideoMatch, GlobalMatch, TrackingActivity)
+- **Models**: Eloquent ORM (TrackingMatch, VideoMatch, GlobalMatches, TrackingActivity)
 - **Services**: MatchingService (algorithm), MatchStorageService (database)
 - **Controllers**: HealthController, MatchController (API endpoints)
 - **Database**: PostgreSQL with optimized schema and relationships

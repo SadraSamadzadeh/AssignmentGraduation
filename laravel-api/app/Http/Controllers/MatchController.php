@@ -5,7 +5,6 @@ namespace App\Http\Controllers;
 use App\Services\MatchingService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Exception;
 
 class MatchController extends Controller
 {
@@ -17,50 +16,33 @@ class MatchController extends Controller
     }
 
     /**
-     * Main matching endpoint - give it tracking and video data, get match score
+     * Match tracking and video data
      */
     public function match(Request $request): JsonResponse
     {
-        try {
-            $trackingData = $request->input('trackingData');
-            $videoData = $request->input('videoData');
+        $trackingData = $request->input('trackingData');
+        $videoData = $request->input('videoData');
 
-            if (!$trackingData || !$videoData) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Please provide both trackingData and videoData'
-                ], 400);
-            }
-
-            // Perform matching using the same algorithm as TypeScript
-            $result = $this->matchingService->compareTrackingAndVideo($trackingData, $videoData);
-
-            // Generate global match ID if score is good (≥60)
-            $response = [
-                'tracking_id' => $trackingData['id'],
-                'video_id' => $videoData['id'],
-                'match_score' => $result['score'],
-                'confidence_level' => $result['confidence'],
-                'reasons' => $result['reasons'],
-                'should_store' => $result['score'] >= 60,
-                'global_match_id' => $result['score'] >= 60 ? 'match_' . uniqid() : null
-            ];
-
+        if (!$trackingData || !$videoData) {
             return response()->json([
-                'success' => true,
-                'data' => $response
-            ]);
-
-        } catch (Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Matching failed: ' . $e->getMessage()
-            ], 500);
+                'error' => 'Please provide both trackingData and videoData'
+            ], 400);
         }
+
+        $result = $this->matchingService->compareTrackingAndVideo($trackingData, $videoData);
+
+        return response()->json([
+            'success' => true,
+            'tracking_id' => $trackingData['id'],
+            'video_id' => $videoData['id'],
+            'match_score' => $result['score'],
+            'confidence_level' => $result['confidence'],
+            'details' => $result['reasons']
+        ]);
     }
 
     /**
-     * Test endpoint with sample data
+     * Test with sample data
      */
     public function test(): JsonResponse
     {
@@ -84,20 +66,14 @@ class MatchController extends Controller
 
         $result = $this->matchingService->compareTrackingAndVideo($trackingData, $videoData);
 
-        $response = [
+        return response()->json([
+            'success' => true,
+            'message' => 'Test completed with sample data',
             'tracking_id' => $trackingData['id'],
             'video_id' => $videoData['id'],
             'match_score' => $result['score'],
             'confidence_level' => $result['confidence'],
-            'reasons' => $result['reasons'],
-            'should_store' => $result['score'] >= 60,
-            'global_match_id' => $result['score'] >= 60 ? 'match_' . uniqid() : null
-        ];
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Test completed with sample data',
-            'data' => $response
+            'details' => $result['reasons']
         ]);
     }
 
@@ -107,9 +83,8 @@ class MatchController extends Controller
     public function health(): JsonResponse
     {
         return response()->json([
-            'success' => true,
+            'status' => 'ok',
             'message' => 'Laravel Matching API is running',
-            'status' => 'healthy',
             'timestamp' => now()
         ]);
     }

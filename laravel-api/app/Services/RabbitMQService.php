@@ -10,20 +10,40 @@ class RabbitMQService
 {
     private $connection;
     private $channel;
+    private $isConnected = false;
 
     public function __construct()
     {
-        $this->connection = new AMQPStreamConnection(
-            env('RABBITMQ_HOST', '127.0.0.1'),
-            env('RABBITMQ_PORT', 5672),
-            env('RABBITMQ_USER', 'guest'),
-            env('RABBITMQ_PASSWORD', 'guest'),
-            env('RABBITMQ_VHOST', '/')
-        );
-        $this->channel = $this->connection->channel();
-        
-        // Declare exchanges and queues
-        $this->setupQueues();
+        try {
+            $this->connection = new AMQPStreamConnection(
+                env('RABBITMQ_HOST', '127.0.0.1'),
+                env('RABBITMQ_PORT', 5672),
+                env('RABBITMQ_USER', 'guest'),
+                env('RABBITMQ_PASSWORD', 'guest'),
+                env('RABBITMQ_VHOST', '/')
+            );
+            $this->channel = $this->connection->channel();
+            
+            // Declare exchanges and queues
+            $this->setupQueues();
+            
+            $this->isConnected = true;
+            Log::info('RabbitMQ connection established successfully');
+        } catch (\Exception $e) {
+            Log::warning('RabbitMQ connection failed - service will operate in degraded mode', [
+                'error' => $e->getMessage(),
+                'host' => env('RABBITMQ_HOST', '127.0.0.1')
+            ]);
+            $this->isConnected = false;
+        }
+    }
+    
+    /**
+     * Check if RabbitMQ is connected
+     */
+    public function isConnected(): bool
+    {
+        return $this->isConnected;
     }
 
     /**
@@ -58,6 +78,13 @@ class RabbitMQService
      */
     public function publishMessage(string $routingKey, array $data, array $headers = []): void
     {
+        if (!$this->isConnected) {
+            Log::warning('Cannot publish message - RabbitMQ not connected', [
+                'routing_key' => $routingKey
+            ]);
+            return;
+        }
+        
         $message = new AMQPMessage(
             json_encode($data),
             [
@@ -80,6 +107,13 @@ class RabbitMQService
      */
     public function consumeQueue(string $queueName, callable $callback): void
     {
+        if (!$this->isConnected) {
+            Log::warning('Cannot consume queue - RabbitMQ not connected', [
+                'queue' => $queueName
+            ]);
+            return;
+        }
+        
         $this->channel->basic_consume(
             $queueName,
             '',
@@ -164,8 +198,10 @@ class RabbitMQService
      */
     public function close(): void
     {
-        $this->channel->close();
-        $this->connection->close();
+        if ($this->isConnected) {
+            $this->channel->close();
+            $this->connection->close();
+        }
     }
 
     public function __destruct()

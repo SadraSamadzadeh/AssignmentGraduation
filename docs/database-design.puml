@@ -1,0 +1,106 @@
+@startuml Database Design
+
+!define Table(name,desc) class name as "desc" << (T,#FFAAAA) >>
+!define primary_key(x) <b><color:red>PK</color> x</b>
+!define foreign_key(x) <color:blue>FK</color> x
+!define unique(x) <color:green>UQ</color> x
+
+skinparam classAttributeIconSize 0
+skinparam linetype ortho
+
+' Users Table - Authentication
+entity "users" {
+  primary_key(id) : BIGINT
+  --
+  unique(email) : VARCHAR(255)
+  name : VARCHAR(255)
+  password : VARCHAR(255)
+  role : ENUM('admin', 'user', 'viewer')
+  email_verified_at : TIMESTAMP NULL
+  remember_token : VARCHAR(100) NULL
+  created_at : TIMESTAMP
+  updated_at : TIMESTAMP
+  last_login_at : TIMESTAMP NULL
+}
+
+' Global Matches Table - Linked Matches
+entity "global_matches" {
+  primary_key(id) : BIGINT
+  --
+  unique(global_match_id) : VARCHAR(255)
+  tracking_id : BIGINT
+  video_id : VARCHAR(255)
+  confidence_level : VARCHAR(50)
+  tracking_data : JSON
+  video_data : JSON
+  status : ENUM('pending', 'confirmed', 'rejected')
+  foreign_key(created_by_user_id) : BIGINT NULL
+  matched_at : TIMESTAMP
+  created_at : TIMESTAMP
+  updated_at : TIMESTAMP
+}
+
+' Tracking Dashboard Table - Unlinked Tracking Data
+entity "tracking_dashboard" {
+  primary_key(id) : BIGINT
+  --
+  tracking_id : BIGINT
+  tracking_data : JSON
+  source_system : VARCHAR(100)
+  match_attempts : INT DEFAULT 0
+  last_match_attempt_at : TIMESTAMP NULL
+  foreign_key(assigned_to_user_id) : BIGINT NULL
+  received_at : TIMESTAMP
+  created_at : TIMESTAMP
+  updated_at : TIMESTAMP
+}
+
+' Video Dashboard Table - Unlinked Video Data
+entity "video_dashboard" {
+  primary_key(id) : BIGINT
+  --
+  video_id : VARCHAR(255)
+  video_reference : VARCHAR(255)
+  video_data : JSON
+  source_system : VARCHAR(100)
+  match_attempts : INT DEFAULT 0
+  last_match_attempt_at : TIMESTAMP NULL
+  received_at : TIMESTAMP
+  created_at : TIMESTAMP
+  updated_at : TIMESTAMP
+}
+
+' Relationships
+global_matches }o--|| users : "created_by_user_id"
+tracking_dashboard }o--|| users : "assigned_to_user_id"
+video_dashboard }o--|| users : "assigned_to_user_id"
+
+note right of users
+  **Users Table**
+  Handles authentication and 
+  authorization for the system.
+  Different roles control access
+  to dashboards and matching features.
+end note
+
+note right of global_matches
+  **Global Matches Table**
+  Stores successfully linked matches
+  between tracking and video data.
+  Includes match confidence and 
+  verification information.
+end note
+
+note right of tracking_dashboard
+  **Tracking Dashboard Table**
+  Contains unlinked tracking records
+  waiting for matching. Kept  for a limited time.
+end note
+
+note right of video_dashboard
+  **Video Dashboard Table**
+  Contains unlinked video records
+  waiting for matching. Kept  for a limited time.
+end note
+
+@enduml

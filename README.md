@@ -74,12 +74,41 @@ Only matches with scores ≥60 are stored in the database.
 ## Project Structure
 
 ```
-laravel-api/
-├── app/
-│   ├── Http/Controllers/    # API controllers
-│   ├── Models/             # Database models
-│   └── Services/           # Business logic
-├── database/migrations/    # Database schema
-├── routes/api.php         # API routes
-└── test-api.php          # Test script
+Integration Layer/
+├── laravel-api/
+│   ├── app/
+│   │   ├── Http/Controllers/    # API controllers
+│   │   ├── Models/             # Database models (User, GlobalMatches, etc.)
+│   │   └── Services/           # Business logic
+│   ├── database/migrations/    # Database schema
+│   ├── routes/api.php         # API routes
+│   └── test-api.php          # Test script
+└── docs/                      # 📚 Database Documentation
+    ├── database-design.puml   # PlantUML diagram
+    ├── DATABASE_README.md     # Comprehensive DB docs
+    ├── schema-reference.sql   # SQL schema reference
+    ├── IMPLEMENTATION_SUMMARY.md
+    ├── QUICK_REFERENCE.md     # Developer quick reference
+    └── README.md              # Documentation index
 ```
+
+## Database Design
+
+The application uses a comprehensive database schema with the following tables:
+
+### Core Tables
+- **users** - User authentication and authorization (admin, user, viewer roles)
+- **global_matches** - Successfully linked tracking-video matches with verification workflow
+- **tracking_dashboard** - Unlinked tracking records awaiting matching
+- **video_dashboard** - Unlinked video records awaiting matching
+
+### Audit Tables
+- **match_history** - Complete audit trail of all match operations
+- **dashboard_activity_log** - User activity tracking on dashboards
+
+**📖 See `/docs` folder for detailed database documentation including:**
+- Entity Relationship Diagram (PlantUML)
+- Table structures and relationships
+- SQL schema reference
+- Usage examples and best practices
+- Quick reference card for developers

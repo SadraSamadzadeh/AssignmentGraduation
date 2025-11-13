@@ -1,0 +1,88 @@
+version: "3.8"
+
+services:
+    postgres:
+        image: postgres:15-alpine
+        container_name: matching_postgres
+        environment:
+            POSTGRES_DB: matching_db
+            POSTGRES_USER: matching_user
+            POSTGRES_PASSWORD: matching_password
+        ports:
+            - "5432:5432"
+        volumes:
+            - postgres_data:/var/lib/postgresql/data
+
+    redis:
+        image: redis:7-alpine
+        container_name: matching_redis
+        ports:
+            - "6379:6379"
+        volumes:
+            - redis_data:/data
+
+    rabbitmq:
+        image: rabbitmq:3.12-management-alpine
+        container_name: matching_rabbitmq
+        environment:
+            RABBITMQ_DEFAULT_USER: admin
+            RABBITMQ_DEFAULT_PASS: admin
+        ports:
+            - "5672:5672"
+            - "15672:15672"
+        volumes:
+            - rabbitmq_data:/var/lib/rabbitmq
+
+    app:
+        build:
+            context: .
+            dockerfile: Dockerfile
+        container_name: matching_app
+        ports:
+            - "8000:8000"
+        environment:
+            APP_NAME: "Laravel Matching API"
+            APP_ENV: production
+            APP_KEY: base64:YOUR_APP_KEY_HERE
+            APP_DEBUG: "false"
+            APP_URL: http://localhost:8000
+            LOG_CHANNEL: stack
+            LOG_LEVEL: info
+            DB_CONNECTION: pgsql
+            DB_HOST: postgres
+            DB_PORT: 5432
+            DB_DATABASE: matching_db
+            DB_USERNAME: matching_user
+            DB_PASSWORD: matching_password
+            RABBITMQ_HOST: rabbitmq
+            RABBITMQ_PORT: 5672
+            RABBITMQ_USER: admin
+            RABBITMQ_PASSWORD: admin
+            RABBITMQ_VHOST: /
+            QUEUE_CONNECTION: rabbitmq
+            BROADCAST_DRIVER: log
+            CACHE_DRIVER: file
+            FILESYSTEM_DISK: local
+            SESSION_DRIVER: file
+            SESSION_LIFETIME: 120
+            REDIS_HOST: redis
+            REDIS_PASSWORD: null
+            REDIS_PORT: 6379
+            MAIL_MAILER: smtp
+            MAIL_HOST: mailpit
+            MAIL_PORT: 1025
+            MAIL_USERNAME: null
+            MAIL_PASSWORD: null
+            MAIL_ENCRYPTION: null
+            MAIL_FROM_ADDRESS: "hello@example.com"
+        depends_on:
+            - postgres
+            - redis
+            - rabbitmq
+        volumes:
+            - ./storage:/var/www/storage
+
+volumes:
+    postgres_data:
+    redis_data:
+    rabbitmq_data:

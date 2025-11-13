@@ -13,13 +13,14 @@ return new class extends Migration
      * - Removes unnecessary fields from global_matches (match_score, match_details, processed_by, verified_by_user_id)
      * - Removes workflow fields from tracking_dashboard (tracking_reference, status, priority, notes)
      * - Removes workflow fields from video_dashboard (status, priority, notes, assigned_to_user_id)
-     * - Drops match_history and dashboard_activity_log tables (audit features removed)
+     * - Drops match_history, dashboard_activity_log, and hub_messages tables (audit features removed)
      */
     public function up(): void
     {
-        // Drop audit tables that are no longer needed
+        // Drop audit and messaging tables that are no longer needed
         Schema::dropIfExists('dashboard_activity_log');
         Schema::dropIfExists('match_history');
+        Schema::dropIfExists('hub_messages');
 
         // Simplify global_matches table
         Schema::table('global_matches', function (Blueprint $table) {
@@ -149,6 +150,25 @@ return new class extends Migration
             $table->index(['dashboard_type']);
             $table->index(['record_id']);
             $table->index(['action']);
+            $table->index(['created_at']);
+        });
+
+        // Recreate hub_messages table
+        Schema::create('hub_messages', function (Blueprint $table) {
+            $table->id();
+            $table->string('message_type', 100);
+            $table->string('routing_key', 100);
+            $table->json('payload');
+            $table->enum('status', ['pending', 'processed', 'failed'])->default('pending');
+            $table->string('from_backend', 50)->nullable();
+            $table->string('to_backend', 50)->nullable();
+            $table->string('request_id')->nullable();
+            $table->timestamp('processed_at')->nullable();
+            $table->text('error_message')->nullable();
+            $table->timestamps();
+
+            $table->index(['status']);
+            $table->index(['request_id']);
             $table->index(['created_at']);
         });
     }

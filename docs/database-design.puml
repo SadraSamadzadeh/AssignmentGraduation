@@ -70,6 +70,26 @@ entity "video_dashboard" {
   updated_at : TIMESTAMP
 }
 
+' Migrations Table - Database Version Control
+entity "migrations" {
+  primary_key(id) : INT
+  --
+  migration : VARCHAR(255)
+  batch : INT
+}
+
+' Failed Jobs Table - Queue Error Tracking
+entity "failed_jobs" {
+  primary_key(id) : BIGINT
+  --
+  unique(uuid) : VARCHAR(255)
+  connection : TEXT
+  queue : TEXT
+  payload : LONGTEXT
+  exception : LONGTEXT
+  failed_at : TIMESTAMP
+}
+
 ' Relationships
 global_matches }o--|| users : "created_by_user_id"
 tracking_dashboard }o--|| users : "assigned_to_user_id"

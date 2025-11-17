@@ -6,7 +6,10 @@
 !define unique(x) <color:green>UQ</color> x
 
 skinparam classAttributeIconSize 0
-skinparam linetype ortho
+left to right direction
+
+' Layout hints - force vertical stacking
+hide empty members
 
 ' Users Table - Authentication
 entity "users" {
@@ -94,6 +97,13 @@ entity "failed_jobs" {
 global_matches }o--|| users : "created_by_user_id"
 tracking_dashboard }o--|| users : "assigned_to_user_id"
 video_dashboard }o--|| users : "assigned_to_user_id"
+
+' Force vertical layout
+users -[hidden]down- global_matches
+global_matches -[hidden]down- tracking_dashboard
+tracking_dashboard -[hidden]down- video_dashboard
+video_dashboard -[hidden]down- migrations
+migrations -[hidden]down- failed_jobs
 
 note right of users
   **Users Table**

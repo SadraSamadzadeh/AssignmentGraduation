@@ -22,14 +22,20 @@ return new class extends Migration
         Schema::dropIfExists('match_history');
         Schema::dropIfExists('hub_messages');
 
+        $driver = Schema::getConnection()->getDriverName();
+
         // Simplify global_matches table
-        Schema::table('global_matches', function (Blueprint $table) {
-            // Drop foreign key constraints first
-            $table->dropForeign(['verified_by_user_id']);
+        Schema::table('global_matches', function (Blueprint $table) use ($driver) {
+            // Drop foreign key constraints first (not supported in SQLite)
+            if ($driver !== 'sqlite') {
+                $table->dropForeign(['verified_by_user_id']);
+            }
             
-            // Drop indexes
-            $table->dropIndex(['match_score']);
-            $table->dropIndex(['verified_by_user_id']);
+            // Drop indexes (skip if they don't exist in SQLite)
+            if ($driver !== 'sqlite') {
+                $table->dropIndex(['match_score']);
+                $table->dropIndex(['verified_by_user_id']);
+            }
             
             // Drop columns
             $table->dropColumn([
@@ -41,10 +47,12 @@ return new class extends Migration
         });
 
         // Simplify tracking_dashboard table
-        Schema::table('tracking_dashboard', function (Blueprint $table) {
-            // Drop indexes
-            $table->dropIndex(['status']);
-            $table->dropIndex(['priority']);
+        Schema::table('tracking_dashboard', function (Blueprint $table) use ($driver) {
+            // Drop indexes (skip if they don't exist in SQLite)
+            if ($driver !== 'sqlite') {
+                $table->dropIndex(['status']);
+                $table->dropIndex(['priority']);
+            }
             
             // Drop columns
             $table->dropColumn([
@@ -56,14 +64,18 @@ return new class extends Migration
         });
 
         // Simplify video_dashboard table
-        Schema::table('video_dashboard', function (Blueprint $table) {
-            // Drop foreign key constraint first
-            $table->dropForeign(['assigned_to_user_id']);
+        Schema::table('video_dashboard', function (Blueprint $table) use ($driver) {
+            // Drop foreign key constraint first (not supported in SQLite)
+            if ($driver !== 'sqlite') {
+                $table->dropForeign(['assigned_to_user_id']);
+            }
             
-            // Drop indexes
-            $table->dropIndex(['status']);
-            $table->dropIndex(['priority']);
-            $table->dropIndex(['assigned_to_user_id']);
+            // Drop indexes (skip if they don't exist in SQLite)
+            if ($driver !== 'sqlite') {
+                $table->dropIndex(['status']);
+                $table->dropIndex(['priority']);
+                $table->dropIndex(['assigned_to_user_id']);
+            }
             
             // Drop columns
             $table->dropColumn([

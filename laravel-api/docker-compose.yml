@@ -1,0 +1,198 @@
+version: "3.8"
+
+services:
+    app:
+        build:
+            context: .
+            dockerfile: Dockerfile
+        container_name: laravel-matching-api
+        restart: unless-stopped
+        working_dir: /var/www
+        volumes:
+            - ./:/var/www
+            - ./storage:/var/www/storage
+        environment:
+            - APP_NAME=Laravel Matching API
+            - APP_ENV=production
+            - APP_DEBUG=false
+            - APP_URL=http://localhost:8000
+            - DB_CONNECTION=pgsql
+            - DB_HOST=postgres
+            - DB_PORT=5432
+            - DB_DATABASE=matching_db
+            - DB_USERNAME=matching_user
+            - DB_PASSWORD=matching_password
+            - RABBITMQ_HOST=rabbitmq
+            - RABBITMQ_PORT=5672
+            - RABBITMQ_USER=admin
+            - RABBITMQ_PASSWORD=admin
+            - RABBITMQ_VHOST=/
+            - RABBITMQ_EXCHANGE=imocloud.events
+            - RABBITMQ_QUEUE_PRIMEPLAY=imocloud.match.events
+            - RABBITMQ_QUEUE_VIDEO=video.data.events
+            - QUEUE_CONNECTION=rabbitmq
+            - CACHE_DRIVER=redis
+            - SESSION_DRIVER=redis
+            - REDIS_HOST=redis
+            - REDIS_PORT=6379
+        ports:
+            - "8000:8000"
+        depends_on:
+            postgres:
+                condition: service_healthy
+            rabbitmq:
+                condition: service_healthy
+            redis:
+                condition: service_started
+        networks:
+            - matching-network
+
+    postgres:
+        image: postgres:15-alpine
+        container_name: matching-postgres
+        restart: unless-stopped
+        environment:
+            POSTGRES_DB: matching_db
+            POSTGRES_USER: matching_user
+            POSTGRES_PASSWORD: matching_password
+            POSTGRES_INITDB_ARGS: "--encoding=UTF-8"
+        volumes:
+            - postgres_data:/var/lib/postgresql/data
+        ports:
+            - "5432:5432"
+        networks:
+            - matching-network
+        healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U matching_user -d matching_db"]
+            interval: 10s
+            timeout: 5s
+            retries: 5
+
+    rabbitmq:
+        image: rabbitmq:3.12-management-alpine
+        container_name: matching-rabbitmq
+        restart: unless-stopped
+        environment:
+            RABBITMQ_DEFAULT_USER: admin
+            RABBITMQ_DEFAULT_PASS: admin
+            RABBITMQ_DEFAULT_VHOST: /
+        volumes:
+            - rabbitmq_data:/var/lib/rabbitmq
+        ports:
+            - "5672:5672"
+            - "15672:15672"
+        networks:
+            - matching-network
+        healthcheck:
+            test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+            interval: 15s
+            timeout: 10s
+            retries: 5
+            start_period: 30s
+
+    queue-worker-primeplay:
+        build:
+            context: .
+            dockerfile: Dockerfile
+        container_name: laravel-queue-worker-primeplay
+        restart: unless-stopped
+        working_dir: /var/www
+        volumes:
+            - ./:/var/www
+        environment:
+            - APP_NAME=Laravel Matching API
+            - APP_ENV=production
+            - DB_CONNECTION=pgsql
+            - DB_HOST=postgres
+            - DB_PORT=5432
+            - DB_DATABASE=matching_db
+            - DB_USERNAME=matching_user
+            - DB_PASSWORD=matching_password
+            - RABBITMQ_HOST=rabbitmq
+            - RABBITMQ_PORT=5672
+            - RABBITMQ_USER=admin
+            - RABBITMQ_PASSWORD=admin
+            - RABBITMQ_VHOST=/
+            - RABBITMQ_EXCHANGE=imocloud.events
+            - RABBITMQ_QUEUE_PRIMEPLAY=imocloud.match.events
+            - QUEUE_CONNECTION=rabbitmq_primeplay
+            - CACHE_DRIVER=redis
+            - REDIS_HOST=redis
+        command: php artisan queue:work rabbitmq_primeplay --sleep=3 --tries=3 --timeout=60
+        depends_on:
+            postgres:
+                condition: service_healthy
+            rabbitmq:
+                condition: service_healthy
+            app:
+                condition: service_started
+        networks:
+            - matching-network
+
+    queue-worker-video:
+        build:
+            context: .
+            dockerfile: Dockerfile
+        container_name: laravel-queue-worker-video
+        restart: unless-stopped
+        working_dir: /var/www
+        volumes:
+            - ./:/var/www
+        environment:
+            - APP_NAME=Laravel Matching API
+            - APP_ENV=production
+            - DB_CONNECTION=pgsql
+            - DB_HOST=postgres
+            - DB_PORT=5432
+            - DB_DATABASE=matching_db
+            - DB_USERNAME=matching_user
+            - DB_PASSWORD=matching_password
+            - RABBITMQ_HOST=rabbitmq
+            - RABBITMQ_PORT=5672
+            - RABBITMQ_USER=admin
+            - RABBITMQ_PASSWORD=admin
+            - RABBITMQ_VHOST=/
+            - RABBITMQ_EXCHANGE=imocloud.events
+            - RABBITMQ_QUEUE_VIDEO=video.data.events
+            - QUEUE_CONNECTION=rabbitmq_video
+            - CACHE_DRIVER=redis
+            - REDIS_HOST=redis
+        command: php artisan queue:work rabbitmq_video --sleep=3 --tries=3 --timeout=60
+        depends_on:
+            postgres:
+                condition: service_healthy
+            rabbitmq:
+                condition: service_healthy
+            app:
+                condition: service_started
+        networks:
+            - matching-network
+
+    redis:
+        image: redis:7-alpine
+        container_name: matching-redis
+        restart: unless-stopped
+        command: redis-server --appendonly yes
+        volumes:
+            - redis_data:/data
+        ports:
+            - "6379:6379"
+        networks:
+            - matching-network
+        healthcheck:
+            test: ["CMD", "redis-cli", "ping"]
+            interval: 10s
+            timeout: 3s
+            retries: 3
+
+volumes:
+    postgres_data:
+        driver: local
+    rabbitmq_data:
+        driver: local
+    redis_data:
+        driver: local
+
+networks:
+    matching-network:
+        driver: bridge

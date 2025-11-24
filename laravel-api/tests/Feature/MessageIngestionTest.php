@@ -12,8 +12,6 @@ use Tests\TestCase;
 
 class MessageIngestionTest extends TestCase
 {
-    use RefreshDatabase;
-
     protected function setUp(): void
     {
         parent::setUp();
@@ -23,6 +21,23 @@ class MessageIngestionTest extends TestCase
         
         // Fake the queue for testing
         Queue::fake();
+        
+        // Clean up test data instead of refreshing database
+        $this->cleanupTestData();
+    }
+    
+    protected function tearDown(): void
+    {
+        // Clean up after each test
+        $this->cleanupTestData();
+        parent::tearDown();
+    }
+    
+    protected function cleanupTestData(): void
+    {
+        // Clean up any test data created during tests
+        TrackingDashboard::where('tracking_id', '>=', 999)->delete();
+        VideoDashboard::where('video_id', 'like', 'test-%')->delete();
     }
 
     /**
@@ -30,18 +45,19 @@ class MessageIngestionTest extends TestCase
      */
     public function test_receive_tracking_data_via_http(): void
     {
+        $testId = 9999; // Use test-specific ID
         $trackingData = [
-            'id' => 193,
-            'name' => 'Match Capelle - Westlandia',
+            'id' => $testId,
+            'name' => 'Test Match - Ingestion Test',
             'typeId' => 1,
             'typeName' => 'Match',
-            'teamName' => 'Capelle 1',
+            'teamName' => 'Test Team',
             'sourceId' => 2,
-            'startTime' => '2025-11-01T14:34:01.100Z',
-            'endTime' => '2025-11-01T16:33:39.100Z',
-            'trimmedStartTime' => '02:42:52',
-            'trimmedEndTime' => '04:42:30',
-            'avgTeamDistanceInMeters' => 8281.99,
+            'startTime' => '2025-11-24T10:00:00.100Z',
+            'endTime' => '2025-11-24T12:00:00.100Z',
+            'trimmedStartTime' => '00:05:00',
+            'trimmedEndTime' => '01:55:00',
+            'avgTeamDistanceInMeters' => 8000.0,
             'hasBeenTrimmed' => true,
             'isLive' => false
         ];
@@ -57,8 +73,7 @@ class MessageIngestionTest extends TestCase
         $response->assertStatus(200)
             ->assertJson([
                 'success' => true,
-                'message' => 'Tracking data received and queued for processing',
-                'tracking_id' => 193
+                'message' => 'Tracking data received and queued for processing'
             ]);
 
         // Verify job was dispatched

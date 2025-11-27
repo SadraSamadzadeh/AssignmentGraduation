@@ -12,7 +12,11 @@ class Kernel extends ConsoleKernel
      */
     protected function schedule(Schedule $schedule): void
     {
-        // $schedule->command('inspire')->hourly();
+        // Clean up expired unmatched data every hour
+        $schedule->command('cleanup:expired-unmatched')
+            ->hourly()
+            ->withoutOverlapping()
+            ->runInBackground();
     }
 
     /**

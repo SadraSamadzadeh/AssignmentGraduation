@@ -1,9 +1,9 @@
 <?php return array(
     'root' => array(
         'name' => 'graduation/matching-api',
-        'pretty_version' => 'dev-main',
-        'version' => 'dev-main',
-        'reference' => '615ce696702e2206674a8b3003128175da9fceac',
+        'pretty_version' => '1.0.0+no-version-set',
+        'version' => '1.0.0.0',
+        'reference' => null,
         'type' => 'project',
         'install_path' => __DIR__ . '/../../',
         'aliases' => array(),
@@ -113,9 +113,9 @@
             'dev_requirement' => false,
         ),
         'graduation/matching-api' => array(
-            'pretty_version' => 'dev-main',
-            'version' => 'dev-main',
-            'reference' => '615ce696702e2206674a8b3003128175da9fceac',
+            'pretty_version' => '1.0.0+no-version-set',
+            'version' => '1.0.0.0',
+            'reference' => null,
             'type' => 'project',
             'install_path' => __DIR__ . '/../../',
             'aliases' => array(),
@@ -611,9 +611,9 @@
             'dev_requirement' => true,
         ),
         'php-amqplib/php-amqplib' => array(
-            'pretty_version' => 'v3.7.3',
-            'version' => '3.7.3.0',
-            'reference' => '9f50fe69a9f1a19e2cb25596a354d705de36fe59',
+            'pretty_version' => 'v3.7.4',
+            'version' => '3.7.4.0',
+            'reference' => '381b6f7c600e0e0c7463cdd7f7a1a3bc6268e5fd',
             'type' => 'library',
             'install_path' => __DIR__ . '/../php-amqplib/php-amqplib',
             'aliases' => array(),
@@ -1319,7 +1319,7 @@
         'videlalvaro/php-amqplib' => array(
             'dev_requirement' => false,
             'replaced' => array(
-                0 => 'v3.7.3',
+                0 => 'v3.7.4',
             ),
         ),
         'vladimir-yuldashev/laravel-queue-rabbitmq' => array(

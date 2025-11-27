@@ -70,10 +70,83 @@ return [
                     'passphrase' => env('RABBITMQ_SSL_PASSPHRASE', null),
                 ],
             ],
-            /*
-             * Set to "horizon" if you wish to use Laravel Horizon.
-             */
             'worker' => env('RABBITMQ_WORKER', 'default'),
+        ],
+
+        'rabbitmq_primeplay' => [
+            'driver' => 'rabbitmq',
+            'queue' => env('RABBITMQ_QUEUE_PRIMEPLAY', 'imocloud.match.events'),
+            'connection' => PhpAmqpLib\Connection\AMQPLazyConnection::class,
+            'hosts' => [
+                [
+                    'host' => env('RABBITMQ_HOST', '127.0.0.1'),
+                    'port' => env('RABBITMQ_PORT', 5672),
+                    'user' => env('RABBITMQ_USER', 'guest'),
+                    'password' => env('RABBITMQ_PASSWORD', 'guest'),
+                    'vhost' => env('RABBITMQ_VHOST', '/'),
+                ],
+            ],
+            'options' => [
+                'exchange' => [
+                    'name' => env('RABBITMQ_EXCHANGE', 'imocloud.events'),
+                    'declare' => true,
+                    'type' => 'topic',
+                    'passive' => false,
+                    'durable' => true,
+                    'auto_delete' => false,
+                    'internal' => false,
+                    'nowait' => false,
+                    'arguments' => '[]',
+                ],
+                'queue' => [
+                    'declare' => true,
+                    'bind' => true,
+                    'passive' => false,
+                    'durable' => true,
+                    'exclusive' => false,
+                    'auto_delete' => false,
+                    'arguments' => '[]',
+                    'routing_key' => 'match.#',
+                ],
+            ],
+        ],
+
+        'rabbitmq_video' => [
+            'driver' => 'rabbitmq',
+            'queue' => env('RABBITMQ_QUEUE_VIDEO', 'video.data.events'),
+            'connection' => PhpAmqpLib\Connection\AMQPLazyConnection::class,
+            'hosts' => [
+                [
+                    'host' => env('RABBITMQ_HOST', '127.0.0.1'),
+                    'port' => env('RABBITMQ_PORT', 5672),
+                    'user' => env('RABBITMQ_USER', 'guest'),
+                    'password' => env('RABBITMQ_PASSWORD', 'guest'),
+                    'vhost' => env('RABBITMQ_VHOST', '/'),
+                ],
+            ],
+            'options' => [
+                'exchange' => [
+                    'name' => env('RABBITMQ_EXCHANGE', 'imocloud.events'),
+                    'declare' => true,
+                    'type' => 'topic',
+                    'passive' => false,
+                    'durable' => true,
+                    'auto_delete' => false,
+                    'internal' => false,
+                    'nowait' => false,
+                    'arguments' => '[]',
+                ],
+                'queue' => [
+                    'declare' => true,
+                    'bind' => true,
+                    'passive' => false,
+                    'durable' => true,
+                    'exclusive' => false,
+                    'auto_delete' => false,
+                    'arguments' => '[]',
+                    'routing_key' => 'video.#',
+                ],
+            ],
         ],
 
     ],

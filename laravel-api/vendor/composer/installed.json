@@ -3304,17 +3304,17 @@
         },
         {
             "name": "php-amqplib/php-amqplib",
-            "version": "v3.7.3",
-            "version_normalized": "3.7.3.0",
+            "version": "v3.7.4",
+            "version_normalized": "3.7.4.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/php-amqplib/php-amqplib.git",
-                "reference": "9f50fe69a9f1a19e2cb25596a354d705de36fe59"
+                "reference": "381b6f7c600e0e0c7463cdd7f7a1a3bc6268e5fd"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/php-amqplib/php-amqplib/zipball/9f50fe69a9f1a19e2cb25596a354d705de36fe59",
-                "reference": "9f50fe69a9f1a19e2cb25596a354d705de36fe59",
+                "url": "https://api.github.com/repos/php-amqplib/php-amqplib/zipball/381b6f7c600e0e0c7463cdd7f7a1a3bc6268e5fd",
+                "reference": "381b6f7c600e0e0c7463cdd7f7a1a3bc6268e5fd",
                 "shasum": ""
             },
             "require": {
@@ -3335,7 +3335,7 @@
                 "phpunit/phpunit": "^7.5|^9.5",
                 "squizlabs/php_codesniffer": "^3.6"
             },
-            "time": "2025-02-18T20:11:13+00:00",
+            "time": "2025-11-23T17:00:56+00:00",
             "type": "library",
             "extra": {
                 "branch-alias": {
@@ -3382,7 +3382,7 @@
             ],
             "support": {
                 "issues": "https://github.com/php-amqplib/php-amqplib/issues",
-                "source": "https://github.com/php-amqplib/php-amqplib/tree/v3.7.3"
+                "source": "https://github.com/php-amqplib/php-amqplib/tree/v3.7.4"
             },
             "install-path": "../php-amqplib/php-amqplib"
         },

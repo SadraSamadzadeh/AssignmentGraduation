@@ -18,8 +18,10 @@ class TrackingDashboard extends Model
      */
     protected $fillable = [
         'tracking_id',
+        'tracking_reference',
         'tracking_data',
         'source_system',
+        'status',
         'match_attempts',
         'last_match_attempt_at',
         'assigned_to_user_id',

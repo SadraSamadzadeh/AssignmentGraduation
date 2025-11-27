@@ -27,7 +27,7 @@ services:
             - RABBITMQ_USER=admin
             - RABBITMQ_PASSWORD=admin
             - RABBITMQ_VHOST=/
-            - RABBITMQ_EXCHANGE=imocloud.events
+            - RABBITMQ_EXCHANGE=integration.layer.events
             - RABBITMQ_QUEUE_PRIMEPLAY=imocloud.match.events
             - RABBITMQ_QUEUE_VIDEO=video.data.events
             - QUEUE_CONNECTION=rabbitmq
@@ -113,12 +113,12 @@ services:
             - RABBITMQ_USER=admin
             - RABBITMQ_PASSWORD=admin
             - RABBITMQ_VHOST=/
-            - RABBITMQ_EXCHANGE=imocloud.events
+            - RABBITMQ_EXCHANGE=integration.layer.events
             - RABBITMQ_QUEUE_PRIMEPLAY=imocloud.match.events
             - QUEUE_CONNECTION=rabbitmq_primeplay
             - CACHE_DRIVER=redis
             - REDIS_HOST=redis
-        command: php artisan queue:work rabbitmq_primeplay --sleep=3 --tries=3 --timeout=60
+        command: php artisan rabbitmq:consume-primeplay
         depends_on:
             postgres:
                 condition: service_healthy
@@ -152,12 +152,12 @@ services:
             - RABBITMQ_USER=admin
             - RABBITMQ_PASSWORD=admin
             - RABBITMQ_VHOST=/
-            - RABBITMQ_EXCHANGE=imocloud.events
+            - RABBITMQ_EXCHANGE=integration.layer.events
             - RABBITMQ_QUEUE_VIDEO=video.data.events
             - QUEUE_CONNECTION=rabbitmq_video
             - CACHE_DRIVER=redis
             - REDIS_HOST=redis
-        command: php artisan queue:work rabbitmq_video --sleep=3 --tries=3 --timeout=60
+        command: php artisan rabbitmq:consume-video
         depends_on:
             postgres:
                 condition: service_healthy

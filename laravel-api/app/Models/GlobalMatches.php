@@ -15,15 +15,19 @@ class GlobalMatches extends Model
         "global_match_id",
         "tracking_id", 
         "video_id",
+        "match_score",
         "confidence_level",
+        "match_details",
         "tracking_data",
         "video_data",
         "status",
+        "processed_by",
         "created_by_user_id",
         "matched_at",
     ];
 
     protected $casts = [
+        "match_details" => "array",
         "tracking_data" => "array", 
         "video_data" => "array",
         "matched_at" => "datetime",

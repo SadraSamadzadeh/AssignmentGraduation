@@ -185,6 +185,43 @@ services:
             timeout: 3s
             retries: 3
 
+    scheduler:
+        build:
+            context: .
+            dockerfile: Dockerfile
+        container_name: laravel-scheduler
+        restart: unless-stopped
+        working_dir: /var/www
+        volumes:
+            - ./:/var/www
+        environment:
+            - APP_NAME=Laravel Matching API
+            - APP_ENV=production
+            - DB_CONNECTION=pgsql
+            - DB_HOST=postgres
+            - DB_PORT=5432
+            - DB_DATABASE=matching_db
+            - DB_USERNAME=matching_user
+            - DB_PASSWORD=matching_password
+            - RABBITMQ_HOST=rabbitmq
+            - RABBITMQ_PORT=5672
+            - RABBITMQ_USER=admin
+            - RABBITMQ_PASSWORD=admin
+            - RABBITMQ_VHOST=/
+            - RABBITMQ_EXCHANGE=integration.layer.events
+            - CACHE_DRIVER=redis
+            - REDIS_HOST=redis
+        command: sh -c "while true; do php artisan schedule:run --verbose --no-interaction & sleep 60; done"
+        depends_on:
+            postgres:
+                condition: service_healthy
+            rabbitmq:
+                condition: service_healthy
+            redis:
+                condition: service_started
+        networks:
+            - matching-network
+
 volumes:
     postgres_data:
         driver: local

@@ -38,12 +38,21 @@ class ProcessVideoMessage implements ShouldQueue
             'received_at' => now()->toDateTimeString()
         ]);
 
-        // Extract video/dataset ID from message
-        $datasetId = $this->messageData['datasetId'] ?? $this->messageData['matchId'] ?? null;
-        $videoId = $this->messageData['videoId'] ?? $this->messageData['sessionId'] ?? null;
+        // Extract video/dataset ID from message with flexible field names
+        $datasetId = $this->messageData['datasetId'] 
+            ?? $this->messageData['matchId'] 
+            ?? $this->messageData['match_id']
+            ?? $this->messageData['match']['id'] 
+            ?? $this->messageData['match']['genius_match_id']
+            ?? null;
+            
+        $videoId = $this->messageData['videoId'] 
+            ?? $this->messageData['sessionId']
+            ?? $this->messageData['match']['sa_recording_id']
+            ?? null;
         
         if (!$datasetId && !$videoId) {
-            Log::warning('Video message missing both datasetId and videoId', ['message' => $this->messageData]);
+            Log::warning('Video message missing identifiable IDs', ['message' => $this->messageData]);
             $this->storeGenericMessage();
             return;
         }

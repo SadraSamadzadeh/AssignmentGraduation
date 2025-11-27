@@ -12,11 +12,15 @@ class Kernel extends ConsoleKernel
      */
     protected function schedule(Schedule $schedule): void
     {
+        // Match unmatched data every 15 minutes
+        $schedule->job(new \App\Jobs\MatchUnmatchedData)
+            ->everyFifteenMinutes()
+            ->withoutOverlapping();
+            
         // Clean up expired unmatched data every hour
         $schedule->command('cleanup:expired-unmatched')
             ->hourly()
-            ->withoutOverlapping()
-            ->runInBackground();
+            ->withoutOverlapping();
     }
 
     /**

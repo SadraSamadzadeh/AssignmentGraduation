@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Models\TrackingDashboard;
 use App\Models\VideoDashboard;
 use App\Models\GlobalMatches;
+use App\Models\ConfirmedMatch;
 use App\Services\MatchingService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -53,6 +54,38 @@ class MatchUnmatchedData implements ShouldQueue
         
         // For each video, find best matching tracking using similarity
         foreach ($unmatchedVideos as $video) {
+            $videoData = is_string($video->message_content) ? json_decode($video->message_content, true) : $video->message_content;
+            $videoTeamId = $this->extractVideoTeamId($videoData);
+            
+            if ($videoTeamId) {
+                $confirmedMatch = ConfirmedMatch::where('video_team_id', $videoTeamId)->first();
+                if ($confirmedMatch) {
+                    $tracking = $unmatchedTracking->first(function($t) use ($confirmedMatch) {
+                        $trackingData = is_string($t->message_content) ? json_decode($t->message_content, true) : $t->message_content;
+                        $primeplayTeamId = $this->extractPrimeplayTeamId($trackingData);
+                        return $primeplayTeamId === $confirmedMatch->primeplay_team_id;
+                    });
+                        
+                    if ($tracking) {
+                        $trackingData = is_string($tracking->message_content) ? json_decode($tracking->message_content, true) : $tracking->message_content;
+                        $this->createMatch(
+                            $tracking,
+                            $video,
+                            $trackingData,
+                            $videoData,
+                            ['score' => $confirmedMatch->match_score, 'breakdown' => $confirmedMatch->match_details]
+                        );
+                        $matchCount++;
+                        Log::info('Match created from confirmed team match', [
+                            'video_team_id' => $videoTeamId,
+                            'primeplay_team_id' => $confirmedMatch->primeplay_team_id,
+                            'score' => $confirmedMatch->match_score
+                        ]);
+                        continue;
+                    }
+                }
+            }
+            
             $videoData = is_string($video->message_content) 
                 ? json_decode($video->message_content, true) 
                 : $video->message_content;
@@ -115,6 +148,25 @@ class MatchUnmatchedData implements ShouldQueue
                         'tracking_data' => $trackingData,
                         'result' => $result
                     ];
+                    
+                    if ($result['score'] >= 80) {
+                        $videoTeamId = $this->extractVideoTeamId($videoData);
+                        $primeplayTeamId = $this->extractPrimeplayTeamId($trackingData);
+                        
+                        if ($videoTeamId && $primeplayTeamId) {
+                            ConfirmedMatch::updateOrCreate(
+                                [
+                                    'video_team_id' => $videoTeamId,
+                                    'primeplay_team_id' => $primeplayTeamId
+                                ],
+                                [
+                                    'match_score' => $result['score'],
+                                    'match_details' => $result['breakdown'] ?? [],
+                                    'matched_at' => now()
+                                ]
+                            );
+                        }
+                    }
                 }
             }
             
@@ -348,5 +400,17 @@ class MatchUnmatchedData implements ShouldQueue
             Cache::forget("primeplay:match:{$tracking->tracking_id}");
             Cache::forget("video:match:{$tracking->tracking_id}");
         });
+    }
+
+    protected function extractVideoTeamId(array $videoData): ?string
+    {
+        $match = $videoData['match_data']['match'] ?? $videoData['match'] ?? $videoData;
+        return $match['home_team']['id'] ?? $match['home']['id'] ?? null;
+    }
+
+    protected function extractPrimeplayTeamId(array $trackingData): ?string
+    {
+        $matchData = $trackingData['matchData'] ?? $trackingData;
+        return $matchData['teamId'] ?? $matchData['team_id'] ?? null;
     }
 }

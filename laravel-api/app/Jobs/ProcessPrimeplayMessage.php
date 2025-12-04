@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Models\TrackingDashboard;
 use App\Models\VideoDashboard;
 use App\Models\GlobalMatches;
+use App\Models\ConfirmedMatch;
 use App\Services\MatchingService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -75,7 +76,30 @@ class ProcessPrimeplayMessage implements ShouldQueue
         }
         
         try {
-            // First, try exact ID match in cache
+            $primeplayTeamId = $this->extractPrimeplayTeamId($this->messageData);
+            
+            if ($primeplayTeamId) {
+                $confirmedMatch = ConfirmedMatch::where('primeplay_team_id', $primeplayTeamId)->first();
+                if ($confirmedMatch) {
+                    $video = VideoDashboard::get()
+                        ->first(function($v) use ($confirmedMatch) {
+                            $videoData = is_string($v->message_content) ? json_decode($v->message_content, true) : $v->message_content;
+                            $videoTeamId = $this->extractVideoTeamId($videoData);
+                            return $videoTeamId === $confirmedMatch->video_team_id;
+                        });
+                        
+                    if ($video) {
+                        $this->createGlobalMatch($datasetId, $video->message_content);
+                        Log::info('Match created from confirmed team match', [
+                            'primeplay_team_id' => $primeplayTeamId,
+                            'video_team_id' => $confirmedMatch->video_team_id,
+                            'original_score' => $confirmedMatch->match_score
+                        ]);
+                        return;
+                    }
+                }
+            }
+            
             $videoCacheKey = "video:match:{$datasetId}";
             $videoData = Cache::get($videoCacheKey);
             
@@ -156,7 +180,30 @@ class ProcessPrimeplayMessage implements ShouldQueue
                 $bestMatch['match_result']
             );
             
-            // Delete the matched video record
+            if ($bestMatch['match_result']['score'] >= 80) {
+                $primeplayTeamId = $this->extractPrimeplayTeamId($this->messageData);
+                $videoTeamId = $this->extractVideoTeamId($bestMatch['video_data']);
+                
+                if ($primeplayTeamId && $videoTeamId) {
+                    ConfirmedMatch::updateOrCreate(
+                        [
+                            'video_team_id' => $videoTeamId,
+                            'primeplay_team_id' => $primeplayTeamId
+                        ],
+                        [
+                            'match_score' => $bestMatch['match_result']['score'],
+                            'match_details' => $bestMatch['match_result']['breakdown'] ?? [],
+                            'matched_at' => now()
+                        ]
+                    );
+                    Log::info('High-score team match stored in confirmed_matches', [
+                        'primeplay_team_id' => $primeplayTeamId,
+                        'video_team_id' => $videoTeamId,
+                        'score' => $bestMatch['match_result']['score']
+                    ]);
+                }
+            }
+            
             $bestMatch['video']->delete();
             
             Log::info('Similarity match found and created', [
@@ -536,6 +583,18 @@ class ProcessPrimeplayMessage implements ShouldQueue
                 'message' => $this->messageData
             ]);
         }
+    }
+
+    protected function extractPrimeplayTeamId(array $trackingData): ?string
+    {
+        $matchData = $trackingData['matchData'] ?? $trackingData;
+        return $matchData['teamId'] ?? $matchData['team_id'] ?? null;
+    }
+
+    protected function extractVideoTeamId(array $videoData): ?string
+    {
+        $match = $videoData['match_data']['match'] ?? $videoData['match'] ?? $videoData;
+        return $match['home_team']['id'] ?? $match['home']['id'] ?? null;
     }
 
     public function failed(\Throwable $exception): void

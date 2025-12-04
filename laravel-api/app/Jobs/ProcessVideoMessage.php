@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Models\TrackingDashboard;
 use App\Models\VideoDashboard;
 use App\Models\GlobalMatches;
+use App\Models\ConfirmedMatch;
 use App\Services\MatchingService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -57,7 +58,32 @@ class ProcessVideoMessage implements ShouldQueue
         $matchId = $videoId;
         
         try {
-            // Check if matching tracking data exists in cache
+            $videoTeamId = $this->extractVideoTeamId($this->messageData);
+            
+            if ($videoTeamId) {
+                $confirmedMatch = ConfirmedMatch::where('video_team_id', $videoTeamId)->first();
+                if ($confirmedMatch) {
+                    $tracking = TrackingDashboard::where('status', 'unmatched')
+                        ->orWhereNull('status')
+                        ->get()
+                        ->first(function($t) use ($confirmedMatch) {
+                            $trackingData = is_string($t->message_content) ? json_decode($t->message_content, true) : $t->message_content;
+                            $primeplayTeamId = $this->extractPrimeplayTeamId($trackingData);
+                            return $primeplayTeamId === $confirmedMatch->primeplay_team_id;
+                        });
+                        
+                    if ($tracking) {
+                        $this->createGlobalMatch($matchId, $videoId, $tracking->message_content);
+                        Log::info('Match created from confirmed team match', [
+                            'video_team_id' => $videoTeamId,
+                            'primeplay_team_id' => $confirmedMatch->primeplay_team_id,
+                            'original_score' => $confirmedMatch->match_score
+                        ]);
+                        return;
+                    }
+                }
+            }
+            
             $trackingCacheKey = "primeplay:match:{$matchId}";
             $trackingData = Cache::get($trackingCacheKey);
             
@@ -138,7 +164,30 @@ class ProcessVideoMessage implements ShouldQueue
                 $bestMatch['match_result']
             );
             
-            // Delete the matched tracking record
+            if ($bestMatch['match_result']['score'] >= 80) {
+                $videoTeamId = $this->extractVideoTeamId($this->messageData);
+                $primeplayTeamId = $this->extractPrimeplayTeamId($bestMatch['tracking_data']);
+                
+                if ($videoTeamId && $primeplayTeamId) {
+                    ConfirmedMatch::updateOrCreate(
+                        [
+                            'video_team_id' => $videoTeamId,
+                            'primeplay_team_id' => $primeplayTeamId
+                        ],
+                        [
+                            'match_score' => $bestMatch['match_result']['score'],
+                            'match_details' => $bestMatch['match_result']['breakdown'] ?? [],
+                            'matched_at' => now()
+                        ]
+                    );
+                    Log::info('High-score team match stored in confirmed_matches', [
+                        'video_team_id' => $videoTeamId,
+                        'primeplay_team_id' => $primeplayTeamId,
+                        'score' => $bestMatch['match_result']['score']
+                    ]);
+                }
+            }
+            
             $bestMatch['tracking']->delete();
             
             Log::info('Similarity match found and created (video first)', [
@@ -419,6 +468,18 @@ class ProcessVideoMessage implements ShouldQueue
                 'message' => $this->messageData
             ]);
         }
+    }
+
+    protected function extractVideoTeamId(array $videoData): ?string
+    {
+        $match = $videoData['match_data']['match'] ?? $videoData['match'] ?? $videoData;
+        return $match['home_team']['id'] ?? $match['home']['id'] ?? null;
+    }
+
+    protected function extractPrimeplayTeamId(array $trackingData): ?string
+    {
+        $matchData = $trackingData['matchData'] ?? $trackingData;
+        return $matchData['teamId'] ?? $matchData['team_id'] ?? null;
     }
 
     public function failed(\Throwable $exception): void

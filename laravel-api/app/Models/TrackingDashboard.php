@@ -18,14 +18,20 @@ class TrackingDashboard extends Model
      */
     protected $fillable = [
         'tracking_id',
-        'tracking_reference',
-        'tracking_data',
-        'source_system',
+        'event_date',
         'status',
+        'message_content',
+        'source_system',
+        'dataset_name',
+        'team_name',
+        'start_time',
+        'end_time',
+        'duration_minutes',
         'match_attempts',
         'last_match_attempt_at',
         'assigned_to_user_id',
         'received_at',
+        'expires_at',
     ];
 
     /**
@@ -34,10 +40,13 @@ class TrackingDashboard extends Model
      * @var array<string, string>
      */
     protected $casts = [
-        'tracking_data' => 'array',
+        'message_content' => 'array',
+        'event_date' => 'date',
         'match_attempts' => 'integer',
+        'duration_minutes' => 'integer',
         'last_match_attempt_at' => 'datetime',
         'received_at' => 'datetime',
+        'expires_at' => 'datetime',
     ];
 
     /**

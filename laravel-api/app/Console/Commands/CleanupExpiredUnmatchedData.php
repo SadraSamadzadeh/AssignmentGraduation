@@ -39,7 +39,7 @@ class CleanupExpiredUnmatchedData extends Command
         $this->info("Cutoff time: {$expiryTime->toDateTimeString()}");
         
         if ($dryRun) {
-            $this->warn("🔍 DRY RUN MODE - No data will be deleted");
+            $this->warn("DRY RUN MODE - No data will be deleted");
         }
         
         // Clean up expired tracking data
@@ -93,11 +93,11 @@ class CleanupExpiredUnmatchedData extends Command
         // Summary
         $this->newLine();
         if ($dryRun) {
-            $this->info("🔍 DRY RUN RESULTS:");
+            $this->info("DRY RUN RESULTS:");
             $this->info("  Would delete {$expiredTracking->count()} tracking records (cache-expired: {$trackingCount})");
             $this->info("  Would delete {$expiredVideo->count()} video records (cache-expired: {$videoCount})");
         } else {
-            $this->info("✅ CLEANUP COMPLETE:");
+            $this->info("CLEANUP COMPLETE:");
             $this->info("  Deleted {$trackingCount} expired tracking records");
             $this->info("  Deleted {$videoCount} expired video records");
             

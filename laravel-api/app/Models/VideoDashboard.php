@@ -18,12 +18,21 @@ class VideoDashboard extends Model
      */
     protected $fillable = [
         'video_id',
-        'video_reference',
-        'video_data',
+        'event_date',
+        'status',
+        'message_content',
         'source_system',
+        'home_club_name',
+        'away_club_name',
+        'field_name',
+        'start_time',
+        'end_time',
+        'duration_minutes',
+        'is_training',
         'match_attempts',
         'last_match_attempt_at',
         'received_at',
+        'expires_at',
     ];
 
     /**
@@ -32,10 +41,14 @@ class VideoDashboard extends Model
      * @var array<string, string>
      */
     protected $casts = [
-        'video_data' => 'array',
+        'message_content' => 'array',
+        'event_date' => 'date',
+        'is_training' => 'boolean',
         'match_attempts' => 'integer',
+        'duration_minutes' => 'integer',
         'last_match_attempt_at' => 'datetime',
         'received_at' => 'datetime',
+        'expires_at' => 'datetime',
     ];
 
     /**

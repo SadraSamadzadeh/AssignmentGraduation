@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Models\TrackingDashboard;
 use App\Models\VideoDashboard;
 use App\Models\GlobalMatches;
+use App\Services\MatchingService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -62,28 +63,34 @@ class ProcessPrimeplayMessage implements ShouldQueue
 
     protected function handleMatchImportCompleted(): void
     {
-        // Support multiple ID formats
+        // Extract tracking ID (use datasetId from matchData)
         $datasetId = $this->messageData['datasetId'] 
-            ?? $this->messageData['match']['genius_match_id'] 
+            ?? $this->messageData['matchData']['datasetId']
             ?? $this->messageData['match']['id'] 
             ?? null;
         
         if (!$datasetId) {
-            Log::warning('Primeplay message missing datasetId or match.id', ['message' => $this->messageData]);
+            Log::warning('Primeplay message missing datasetId', ['message' => $this->messageData]);
             return;
         }
         
         try {
-            // Check if matching video data exists in cache
+            // First, try exact ID match in cache
             $videoCacheKey = "video:match:{$datasetId}";
             $videoData = Cache::get($videoCacheKey);
             
             if ($videoData) {
                 $this->createGlobalMatch($datasetId, $videoData);
-                Log::info('Match found and created', ['dataset_id' => $datasetId]);
-            } else {
+                Log::info('Match found and created (exact ID)', ['dataset_id' => $datasetId]);
+                return;
+            }
+            
+            // If no exact match, try similarity matching with all unmatched videos
+            $matchFound = $this->findSimilarVideoMatch($datasetId);
+            
+            if (!$matchFound) {
                 $this->storeTemporaryTracking($datasetId);
-                Log::info('Tracking data stored temporarily', ['dataset_id' => $datasetId]);
+                Log::info('Tracking data stored temporarily (no match found)', ['dataset_id' => $datasetId]);
             }
             
         } catch (\Exception $e) {
@@ -94,6 +101,153 @@ class ProcessPrimeplayMessage implements ShouldQueue
             ]);
             throw $e;
         }
+    }
+    
+    /**
+     * Try to find a similar video match using similarity scoring
+     */
+    protected function findSimilarVideoMatch($datasetId): bool
+    {
+        $unmatchedVideos = VideoDashboard::where('status', 'unmatched')
+            ->orWhereNull('status')
+            ->get();
+            
+        if ($unmatchedVideos->isEmpty()) {
+            return false;
+        }
+        
+        $matchingService = new MatchingService();
+        $bestMatch = null;
+        $bestScore = 0;
+        
+        // Prepare tracking data in format expected by MatchingService
+        $trackingFormatted = $this->formatTrackingDataForMatching($this->messageData, $datasetId);
+        
+        foreach ($unmatchedVideos as $video) {
+            $videoData = is_string($video->message_content) 
+                ? json_decode($video->message_content, true) 
+                : $video->message_content;
+            
+            // Format video data for matching service
+            $videoFormatted = $this->formatVideoDataForMatching($videoData, $video->video_id);
+            
+            $result = $matchingService->compareTrackingAndVideo($trackingFormatted, $videoFormatted);
+            
+            // Skip early exits and require minimum 65 score
+            if (isset($result['early_exit']) && $result['early_exit']) {
+                continue;
+            }
+            
+            if ($result['score'] >= 65 && $result['score'] > $bestScore) {
+                $bestScore = $result['score'];
+                $bestMatch = [
+                    'video' => $video,
+                    'video_data' => $videoData,
+                    'match_result' => $result
+                ];
+            }
+        }
+        
+        if ($bestMatch) {
+            $this->createGlobalMatchWithScore(
+                $datasetId, 
+                $bestMatch['video_data'],
+                $bestMatch['video']->video_id,
+                $bestMatch['match_result']
+            );
+            
+            // Delete the matched video record
+            $bestMatch['video']->delete();
+            
+            Log::info('Similarity match found and created', [
+                'dataset_id' => $datasetId,
+                'video_id' => $bestMatch['video']->video_id,
+                'score' => $bestMatch['match_result']['score'],
+                'confidence' => $bestMatch['match_result']['confidence']
+            ]);
+            
+            return true;
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Format tracking data for MatchingService
+     */
+    protected function formatTrackingDataForMatching(array $trackingData, $datasetId): array
+    {
+        $matchData = $trackingData['matchData'] ?? $trackingData;
+        
+        return [
+            'id' => $datasetId,
+            'startTime' => $matchData['start'] ?? $matchData['startTime'] ?? now()->toIso8601String(),
+            'endTime' => $matchData['end'] ?? $matchData['endTime'] ?? now()->toIso8601String(),
+            'teamName' => $matchData['teamName'] ?? $matchData['name'] ?? '',
+        ];
+    }
+    
+    /**
+     * Format video data for MatchingService
+     */
+    protected function formatVideoDataForMatching(array $videoData, $videoId): array
+    {
+        $match = $videoData['match_data']['match'] ?? $videoData['match'] ?? $videoData;
+        
+        return [
+            'id' => $videoId,
+            'starting_at' => [
+                'date' => $match['starting_at'] ?? $match['atom_starting_at'] ?? now()->toIso8601String(),
+            ],
+            'stopping_at' => [
+                'date' => $match['stopping_at'] ?? $match['atom_stopping_at'] ?? now()->toIso8601String(),
+            ],
+            'timezone' => $match['timezone'] ?? 'UTC',
+            'home' => [
+                'name' => $match['home_team']['name'] ?? $match['home']['name'] ?? '',
+            ],
+            'away' => [
+                'name' => $match['away_team']['name'] ?? $match['away']['name'] ?? '',
+            ],
+            'club' => [
+                'name' => $match['club']['name'] ?? $match['home_club']['name'] ?? '',
+            ],
+        ];
+    }
+    
+    /**
+     * Create global match with similarity score
+     */
+    protected function createGlobalMatchWithScore($datasetId, array $videoData, $videoId, array $matchResult): void
+    {
+        DB::transaction(function () use ($datasetId, $videoData, $videoId, $matchResult) {
+            GlobalMatches::create([
+                'global_match_id' => "match_{$datasetId}_{$videoId}_" . now()->timestamp,
+                'tracking_id' => $datasetId,
+                'video_id' => $videoId,
+                'match_score' => $matchResult['score'],
+                'confidence_level' => $matchResult['confidence'],
+                'match_details' => [
+                    'match_type' => 'similarity_matched',
+                    'matched_by' => 'system',
+                    'match_criteria' => 'similarity_algorithm',
+                    'reasons' => $matchResult['reasons'] ?? [],
+                ],
+                'tracking_data' => $this->messageData,
+                'video_data' => $videoData,
+                'status' => $matchResult['score'] >= 85 ? 'confirmed' : 'pending_review',
+                'processed_by' => 'system',
+                'matched_at' => now(),
+            ]);
+            
+            // Remove from cache
+            Cache::forget("primeplay:match:{$datasetId}");
+            Cache::forget("video:match:{$datasetId}");
+            
+            // Delete temporary records
+            TrackingDashboard::where('tracking_id', $datasetId)->delete();
+            VideoDashboard::where('video_id', $videoId)->delete();
+        });
     }
 
     /**
@@ -203,15 +357,50 @@ class ProcessPrimeplayMessage implements ShouldQueue
      */
     protected function storeTemporaryTracking($datasetId): void
     {
-        // Store in database
-        TrackingDashboard::create([
-            'tracking_id' => $datasetId,
-            'tracking_reference' => "primeplay_{$datasetId}",
-            'tracking_data' => $this->messageData,
-            'source_system' => 'primeplay',
-            'status' => 'unmatched',
-            'received_at' => now(),
-        ]);
+        // Extract fields from message data
+        $matchData = $this->messageData['matchData'] ?? [];
+        $startTime = $matchData['startTime'] ?? $matchData['start'] ?? null;
+        $endTime = $matchData['endTime'] ?? $matchData['end'] ?? null;
+        
+        // Calculate duration in minutes
+        $durationMinutes = null;
+        if ($startTime && $endTime) {
+            try {
+                $start = new \DateTime($startTime);
+                $end = new \DateTime($endTime);
+                $durationMinutes = (int) round(($end->getTimestamp() - $start->getTimestamp()) / 60);
+            } catch (\Exception $e) {
+                Log::warning('Failed to calculate duration', ['error' => $e->getMessage()]);
+            }
+        }
+        
+        // Extract event date
+        $eventDate = null;
+        if ($startTime) {
+            try {
+                $eventDate = (new \DateTime($startTime))->format('Y-m-d');
+            } catch (\Exception $e) {
+                $eventDate = now()->format('Y-m-d');
+            }
+        }
+        
+        // Store in database (prevent duplicates with updateOrCreate)
+        TrackingDashboard::updateOrCreate(
+            ['tracking_id' => $datasetId],
+            [
+                'event_date' => $eventDate ?? now()->format('Y-m-d'),
+                'status' => 'unmatched',
+                'message_content' => $this->messageData,
+                'source_system' => 'primeplay',
+                'dataset_name' => $matchData['name'] ?? null,
+                'team_name' => $matchData['teamName'] ?? null,
+                'start_time' => $startTime,
+                'end_time' => $endTime,
+                'duration_minutes' => $durationMinutes,
+                'received_at' => now(),
+                'expires_at' => now()->addDays(7),
+            ]
+        );
         
         // Store in cache with 24h TTL
         $cacheKey = "primeplay:match:{$datasetId}";
@@ -219,6 +408,7 @@ class ProcessPrimeplayMessage implements ShouldQueue
         
         Log::info('Tracking data stored temporarily', [
             'tracking_id' => $datasetId,
+            'event_date' => $eventDate,
             'cache_key' => $cacheKey,
             'expires_at' => now()->addHours(24)->toDateTimeString(),
         ]);
@@ -267,14 +457,51 @@ class ProcessPrimeplayMessage implements ShouldQueue
     {
         $videoId = $this->messageData['match']['sa_recording_id'] ?? "video_{$matchId}";
         
+        // Extract fields from message data
+        $matchData = $this->messageData['match'] ?? [];
+        $homeClub = $matchData['home']['name'] ?? null;
+        $awayClub = $matchData['away']['name'] ?? null;
+        $startTime = $matchData['starting_at']['date'] ?? null;
+        $endTime = $matchData['stopping_at']['date'] ?? null;
+        
+        // Calculate duration
+        $durationMinutes = null;
+        if ($startTime && $endTime) {
+            try {
+                $start = new \DateTime($startTime);
+                $end = new \DateTime($endTime);
+                $durationMinutes = (int) round(($end->getTimestamp() - $start->getTimestamp()) / 60);
+            } catch (\Exception $e) {
+                // Ignore
+            }
+        }
+        
+        // Extract event date
+        $eventDate = null;
+        if ($startTime) {
+            try {
+                $eventDate = (new \DateTime($startTime))->format('Y-m-d');
+            } catch (\Exception $e) {
+                $eventDate = now()->format('Y-m-d');
+            }
+        }
+        
         // Store in database
         VideoDashboard::create([
             'video_id' => $videoId,
-            'video_reference' => $videoId,
-            'video_data' => $this->messageData,
-            'source_system' => 'video_dashboard',
+            'event_date' => $eventDate ?? now()->format('Y-m-d'),
             'status' => 'unmatched',
+            'message_content' => $this->messageData,
+            'source_system' => 'primeplay',
+            'home_club_name' => $homeClub,
+            'away_club_name' => $awayClub,
+            'field_name' => $matchData['field']['name'] ?? null,
+            'start_time' => $startTime,
+            'end_time' => $endTime,
+            'duration_minutes' => $durationMinutes,
+            'is_training' => $matchData['is_training'] ?? false,
             'received_at' => now(),
+            'expires_at' => now()->addDays(7),
         ]);
         
         // Store in cache with 24h TTL
@@ -292,12 +519,16 @@ class ProcessPrimeplayMessage implements ShouldQueue
     protected function storeGenericMessage(): void
     {
         try {
-            TrackingDashboard::create([
-                'tracking_id' => $this->messageData['datasetId'] ?? $this->messageData['sessionId'] ?? null,
-                'tracking_data' => $this->messageData,
-                'source_system' => 'primeplay',
-                'received_at' => now(),
-            ]);
+            $trackingId = $this->messageData['datasetId'] ?? $this->messageData['sessionId'] ?? ('unknown_' . now()->timestamp);
+            
+            TrackingDashboard::updateOrCreate(
+                ['tracking_id' => $trackingId],
+                [
+                    'message_content' => $this->messageData,
+                    'source_system' => 'primeplay',
+                    'received_at' => now(),
+                ]
+            );
             
         } catch (\Exception $e) {
             Log::error('Failed to store Primeplay message in database', [

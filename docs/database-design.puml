@@ -1,136 +1,328 @@
-@startuml Database Design
+@startuml Database Design - Match Linking System
 
 !define Table(name,desc) class name as "desc" << (T,#FFAAAA) >>
 !define primary_key(x) <b><color:red>PK</color> x</b>
 !define foreign_key(x) <color:blue>FK</color> x
 !define unique(x) <color:green>UQ</color> x
+!define indexed(x) <color:orange>IDX</color> x
 
 skinparam classAttributeIconSize 0
 left to right direction
-
-' Layout hints - force vertical stacking
 hide empty members
 
-' Users Table - Authentication
+' ============================================================================
+' CORE AUTHENTICATION
+' ============================================================================
+
 entity "users" {
-  primary_key(id) : BIGINT
+  primary_key(id) : BIGSERIAL
   --
   unique(email) : VARCHAR(255)
   name : VARCHAR(255)
   password : VARCHAR(255)
-  role : ENUM('admin', 'user', 'viewer')
+  role : VARCHAR(50) DEFAULT 'user'
   email_verified_at : TIMESTAMP NULL
   remember_token : VARCHAR(100) NULL
-  created_at : TIMESTAMP
-  updated_at : TIMESTAMP
   last_login_at : TIMESTAMP NULL
-}
-
-' Global Matches Table - Linked Matches
-entity "global_matches" {
-  primary_key(id) : BIGINT
-  --
-  unique(global_match_id) : VARCHAR(255)
-  tracking_id : BIGINT
-  video_id : VARCHAR(255)
-  confidence_level : VARCHAR(50)
-  tracking_data : JSON
-  video_data : JSON
-  status : ENUM('pending', 'confirmed', 'rejected')
-  foreign_key(created_by_user_id) : BIGINT NULL
-  matched_at : TIMESTAMP
   created_at : TIMESTAMP
   updated_at : TIMESTAMP
+  --
+  CHECK (role IN ('admin', 'user', 'viewer'))
 }
 
-' Tracking Dashboard Table - Unlinked Tracking Data
+' ============================================================================
+' UNMATCHED DATA STORAGE (Temporary holding area)
+' ============================================================================
+
 entity "tracking_dashboard" {
-  primary_key(id) : BIGINT
+  primary_key(id) : BIGSERIAL
   --
-  tracking_id : BIGINT
-  tracking_data : JSON
-  source_system : VARCHAR(100)
-  match_attempts : INT DEFAULT 0
+  indexed(tracking_id) : BIGINT NOT NULL
+  indexed(event_date) : DATE NOT NULL
+  indexed(status) : VARCHAR(50) DEFAULT 'unmatched'
+  message_content : JSONB NOT NULL
+  source_system : VARCHAR(100) DEFAULT 'primeplay'
+  
+  ' Extracted fields for quick filtering
+  dataset_name : VARCHAR(255)
+  team_name : VARCHAR(255)
+  start_time : TIMESTAMP
+  end_time : TIMESTAMP
+  duration_minutes : INTEGER
+  
+  ' Match tracking
+  match_attempts : INTEGER DEFAULT 0
   last_match_attempt_at : TIMESTAMP NULL
-  foreign_key(assigned_to_user_id) : BIGINT NULL
-  received_at : TIMESTAMP
+  
+  ' Lifecycle
+  received_at : TIMESTAMP NOT NULL
+  expires_at : TIMESTAMP NULL
   created_at : TIMESTAMP
   updated_at : TIMESTAMP
+  --
+  CHECK (status IN ('unmatched', 'matched', 'expired', 'ignored'))
+  INDEX idx_tracking_date_status (event_date, status)
+  INDEX idx_tracking_unmatched (status) WHERE status='unmatched'
 }
 
-' Video Dashboard Table - Unlinked Video Data
 entity "video_dashboard" {
-  primary_key(id) : BIGINT
+  primary_key(id) : BIGSERIAL
   --
-  video_id : VARCHAR(255)
-  video_reference : VARCHAR(255)
-  video_data : JSON
-  source_system : VARCHAR(100)
-  match_attempts : INT DEFAULT 0
+  indexed(video_id) : VARCHAR(255) NOT NULL
+  indexed(event_date) : DATE NOT NULL
+  indexed(status) : VARCHAR(50) DEFAULT 'unmatched'
+  message_content : JSONB NOT NULL
+  source_system : VARCHAR(100) DEFAULT 'usf_sport'
+  
+  ' Extracted fields for quick filtering
+  home_club_name : VARCHAR(255)
+  away_club_name : VARCHAR(255)
+  field_name : VARCHAR(255)
+  start_time : TIMESTAMP
+  end_time : TIMESTAMP
+  duration_minutes : INTEGER
+  is_training : BOOLEAN DEFAULT false
+  
+  ' Match tracking
+  match_attempts : INTEGER DEFAULT 0
   last_match_attempt_at : TIMESTAMP NULL
-  received_at : TIMESTAMP
+  
+  ' Lifecycle
+  received_at : TIMESTAMP NOT NULL
+  expires_at : TIMESTAMP NULL
   created_at : TIMESTAMP
   updated_at : TIMESTAMP
-}
-
-' Migrations Table - Database Version Control
-entity "migrations" {
-  primary_key(id) : INT
   --
-  migration : VARCHAR(255)
-  batch : INT
+  CHECK (status IN ('unmatched', 'matched', 'expired', 'ignored'))
+  INDEX idx_video_date_status (event_date, status)
+  INDEX idx_video_unmatched (status) WHERE status='unmatched'
 }
 
-' Failed Jobs Table - Queue Error Tracking
+' ============================================================================
+' MATCHED DATA STORAGE (Permanent records)
+' ============================================================================
+
+entity "global_matches" {
+  primary_key(id) : BIGSERIAL
+  --
+  unique(global_match_id) : VARCHAR(255) NOT NULL
+  indexed(tracking_id) : BIGINT NOT NULL
+  indexed(video_id) : VARCHAR(255) NOT NULL
+  
+  ' Match quality metrics
+  match_score : NUMERIC(5,2) NOT NULL
+  confidence_level : VARCHAR(50) NOT NULL
+  match_details : JSONB NOT NULL
+  
+  ' Original data snapshots
+  tracking_data : JSONB NOT NULL
+  video_data : JSONB NOT NULL
+  
+  ' Match status and review
+  indexed(status) : VARCHAR(50) DEFAULT 'pending_review'
+  rejection_reason : TEXT NULL
+  reviewed_by_user_id : BIGINT NULL
+  reviewed_at : TIMESTAMP NULL
+  
+  ' Match metadata
+  processed_by : VARCHAR(255) NOT NULL
+  matched_at : TIMESTAMP NOT NULL
+  created_at : TIMESTAMP
+  updated_at : TIMESTAMP
+  --
+  CHECK (status IN ('pending_review', 'confirmed', 'rejected', 'auto_confirmed'))
+  CHECK (confidence_level IN ('high', 'medium', 'low', 'very_low'))
+  CHECK (match_score >= 0 AND match_score <= 100)
+  INDEX idx_match_tracking_video (tracking_id, video_id)
+  INDEX idx_match_status_score (status, match_score)
+  UNIQUE INDEX idx_unique_match (tracking_id, video_id)
+}
+
+' ============================================================================
+' MATCH HISTORY & AUDIT
+' ============================================================================
+
+entity "match_history" {
+  primary_key(id) : BIGSERIAL
+  --
+  foreign_key(global_match_id) : BIGINT NOT NULL
+  action : VARCHAR(50) NOT NULL
+  previous_status : VARCHAR(50) NULL
+  new_status : VARCHAR(50) NOT NULL
+  previous_score : NUMERIC(5,2) NULL
+  new_score : NUMERIC(5,2) NULL
+  changes : JSONB NULL
+  reason : TEXT NULL
+  foreign_key(performed_by_user_id) : BIGINT NULL
+  performed_at : TIMESTAMP NOT NULL
+  created_at : TIMESTAMP
+  --
+  CHECK (action IN ('created', 'confirmed', 'rejected', 'score_updated', 'data_updated'))
+}
+
+' ============================================================================
+' SYSTEM TABLES
+' ============================================================================
+
+entity "jobs" {
+  primary_key(id) : BIGSERIAL
+  --
+  queue : VARCHAR(255)
+  payload : TEXT
+  attempts : SMALLINT
+  reserved_at : INTEGER NULL
+  available_at : INTEGER
+  created_at : INTEGER
+  --
+  INDEX idx_jobs_queue (queue)
+}
+
 entity "failed_jobs" {
-  primary_key(id) : BIGINT
+  primary_key(id) : BIGSERIAL
   --
   unique(uuid) : VARCHAR(255)
   connection : TEXT
   queue : TEXT
-  payload : LONGTEXT
-  exception : LONGTEXT
+  payload : TEXT
+  exception : TEXT
   failed_at : TIMESTAMP
 }
 
-' Relationships
-global_matches }o--|| users : "created_by_user_id"
-tracking_dashboard }o--|| users : "assigned_to_user_id"
-video_dashboard }o--|| users : "assigned_to_user_id"
+entity "migrations" {
+  primary_key(id) : SERIAL
+  --
+  migration : VARCHAR(255)
+  batch : INTEGER
+}
+
+' ============================================================================
+' RELATIONSHIPS
+' ============================================================================
+
+global_matches }o..|| users : "reviewed_by"
+match_history }o--|| global_matches : "tracks changes"
+match_history }o..|| users : "performed_by"
 
 ' Force vertical layout
-users -[hidden]down- global_matches
-global_matches -[hidden]down- tracking_dashboard
+users -[hidden]down- tracking_dashboard
 tracking_dashboard -[hidden]down- video_dashboard
-video_dashboard -[hidden]down- migrations
-migrations -[hidden]down- failed_jobs
+video_dashboard -[hidden]down- global_matches
+global_matches -[hidden]down- match_history
+match_history -[hidden]down- jobs
+jobs -[hidden]down- failed_jobs
+failed_jobs -[hidden]down- migrations
 
-note right of users
-  **Users Table**
-  Handles authentication and 
-  authorization for the system.
-  Different roles control access
-  to dashboards and matching features.
-end note
-
-note right of global_matches
-  **Global Matches Table**
-  Stores successfully linked matches
-  between tracking and video data.
-  Includes match confidence and 
-  verification information.
-end note
+' ============================================================================
+' DOCUMENTATION NOTES
+' ============================================================================
 
 note right of tracking_dashboard
-  **Tracking Dashboard Table**
-  Contains unlinked tracking records
-  waiting for matching. Kept  for a limited time.
+  **Tracking Dashboard (Temporary Storage)**
+  
+  Stores unmatched Primeplay tracking data.
+  
+  Key Fields:
+  • event_date: Used for date pre-filtering (±1 day)
+  • status: 'unmatched' | 'matched' | 'expired' | 'ignored'
+  • start_time/end_time: For temporal matching
+  • team_name: Generic identifier (e.g., "Team 1", "Test Team")
+  
+  Note: Primeplay does NOT provide actual club names,
+  only generic team identifiers. Matching relies
+  primarily on time proximity (70% weight).
+  
+  Lifecycle:
+  • Created when tracking message received
+  • Matched within 24-48 hours typically
+  • Expired after 7 days if unmatched
+  • Deleted after 30 days
 end note
 
 note right of video_dashboard
-  **Video Dashboard Table**
-  Contains unlinked video records
-  waiting for matching. Kept  for a limited time.
+  **Video Dashboard (Temporary Storage)**
+  
+  Stores unmatched USF Sport video data.
+  
+  Key Fields:
+  • event_date: Used for date pre-filtering (±1 day)
+  • status: 'unmatched' | 'matched' | 'expired' | 'ignored'
+  • home_club_name/away_club_name: Actual club names
+  • start_time/end_time: For temporal matching
+  • is_training: Distinguishes training vs matches
+  
+  Note: Video data contains actual club names
+  but cannot be matched against tracking's
+  generic team names. Use time-based matching.
+  
+  Lifecycle:
+  • Created when video message received
+  • Matched within 24-48 hours typically
+  • Expired after 7 days if unmatched
+  • Deleted after 30 days
+end note
+
+note right of global_matches
+  **Global Matches (Permanent Storage)**
+  
+  Stores confirmed matches between tracking and video.
+  
+  Matching Algorithm (Time-Focused):
+  • Time Proximity: 70% weight
+  • Duration Similarity: 20% weight
+  • Temporal Overlap: 10% weight
+  • Minimum threshold: 65 points
+  • Auto-confirm threshold: 85 points
+  
+  Status Flow:
+  • pending_review: Score 65-84, needs review
+  • auto_confirmed: Score ≥85, automatically confirmed
+  • confirmed: Manually approved by user
+  • rejected: Manually rejected by user
+  
+  match_details contains:
+  • Time proximity score breakdown
+  • Duration similarity metrics
+  • Temporal overlap percentage
+  • Matching job metadata
+end note
+
+note right of match_history
+  **Match History (Audit Trail)**
+  
+  Tracks all changes to matches for:
+  • Compliance and auditing
+  • User action tracking
+  • Algorithm improvement analysis
+  • Debugging match quality issues
+  
+  Actions Tracked:
+  • created: Initial match creation
+  • confirmed: User/auto confirmation
+  • rejected: User rejection
+  • score_updated: Algorithm recalculation
+  • data_updated: Source data changes
+end note
+
+note as N1
+  **MATCHING ALGORITHM SUMMARY**
+  
+  Data Limitation Understanding:
+  • Primeplay tracking: Generic team names only ("Test Team", "Team 1")
+  • USF Sport video: Actual club names ("VV Capelle", "FC 's-Gravenzande")
+  • Cannot match on names - they are incompatible data formats
+  
+  Solution: Time-Focused Matching
+  • Stage 1: Date pre-filtering (±1 day, reduces 97% of comparisons)
+  • Stage 2: Time proximity scoring (70% weight)
+  • Stage 3: Duration similarity (20% weight)
+  • Stage 4: Temporal overlap (10% weight)
+  • Early exit: Skip if time difference > 2 days
+  
+  Performance Optimization:
+  • Indexed event_date columns for fast filtering
+  • Partial indexes on status='unmatched' for active queries
+  • JSONB for flexible data storage with GIN indexes
+  • Composite indexes for common query patterns
 end note
 
 @enduml

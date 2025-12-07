@@ -5,7 +5,8 @@ namespace App\Jobs;
 use App\Models\TrackingDashboard;
 use App\Models\VideoDashboard;
 use App\Models\GlobalMatches;
-use App\Models\ConfirmedMatch;
+use App\Models\TeamMapping;
+use App\Models\MatchHistory;
 use App\Services\MatchingService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -79,21 +80,21 @@ class ProcessPrimeplayMessage implements ShouldQueue
             $primeplayTeamId = $this->extractPrimeplayTeamId($this->messageData);
             
             if ($primeplayTeamId) {
-                $confirmedMatch = ConfirmedMatch::where('primeplay_team_id', $primeplayTeamId)->first();
-                if ($confirmedMatch) {
+                $TeamMapping = TeamMapping::where('primeplay_team_id', $primeplayTeamId)->first();
+                if ($TeamMapping) {
                     $video = VideoDashboard::get()
-                        ->first(function($v) use ($confirmedMatch) {
+                        ->first(function($v) use ($TeamMapping) {
                             $videoData = is_string($v->message_content) ? json_decode($v->message_content, true) : $v->message_content;
                             $videoTeamId = $this->extractVideoTeamId($videoData);
-                            return $videoTeamId === $confirmedMatch->video_team_id;
+                            return $videoTeamId === $TeamMapping->video_team_id;
                         });
                         
                     if ($video) {
                         $this->createGlobalMatch($datasetId, $video->message_content);
                         Log::info('Match created from confirmed team match', [
                             'primeplay_team_id' => $primeplayTeamId,
-                            'video_team_id' => $confirmedMatch->video_team_id,
-                            'original_score' => $confirmedMatch->match_score
+                            'video_team_id' => $TeamMapping->video_team_id,
+                            'original_score' => $TeamMapping->match_score
                         ]);
                         return;
                     }
@@ -185,7 +186,7 @@ class ProcessPrimeplayMessage implements ShouldQueue
                 $videoTeamId = $this->extractVideoTeamId($bestMatch['video_data']);
                 
                 if ($primeplayTeamId && $videoTeamId) {
-                    ConfirmedMatch::updateOrCreate(
+                    TeamMapping::updateOrCreate(
                         [
                             'video_team_id' => $videoTeamId,
                             'primeplay_team_id' => $primeplayTeamId
@@ -435,15 +436,15 @@ class ProcessPrimeplayMessage implements ShouldQueue
         TrackingDashboard::updateOrCreate(
             ['tracking_id' => $datasetId],
             [
-                'event_date' => $eventDate ?? now()->format('Y-m-d'),
-                'status' => 'unmatched',
-                'message_content' => $this->messageData,
+                'tracking_data' => $this->messageData,
                 'source_system' => 'primeplay',
-                'dataset_name' => $matchData['name'] ?? null,
-                'team_name' => $matchData['teamName'] ?? null,
+                'event_date' => $eventDate ?? now()->format('Y-m-d'),
                 'start_time' => $startTime,
                 'end_time' => $endTime,
                 'duration_minutes' => $durationMinutes,
+                'dataset_name' => $matchData['name'] ?? null,
+                'team_name' => $matchData['teamName'] ?? null,
+                'status' => 'unmatched',
                 'received_at' => now(),
                 'expires_at' => now()->addDays(7),
             ]
@@ -536,17 +537,17 @@ class ProcessPrimeplayMessage implements ShouldQueue
         // Store in database
         VideoDashboard::create([
             'video_id' => $videoId,
-            'event_date' => $eventDate ?? now()->format('Y-m-d'),
-            'status' => 'unmatched',
-            'message_content' => $this->messageData,
+            'video_data' => $this->messageData,
             'source_system' => 'primeplay',
-            'home_club_name' => $homeClub,
-            'away_club_name' => $awayClub,
-            'field_name' => $matchData['field']['name'] ?? null,
+            'event_date' => $eventDate ?? now()->format('Y-m-d'),
             'start_time' => $startTime,
             'end_time' => $endTime,
             'duration_minutes' => $durationMinutes,
+            'home_club_name' => $homeClub,
+            'away_club_name' => $awayClub,
+            'field_name' => $matchData['field']['name'] ?? null,
             'is_training' => $matchData['is_training'] ?? false,
+            'status' => 'unmatched',
             'received_at' => now(),
             'expires_at' => now()->addDays(7),
         ]);
@@ -571,7 +572,7 @@ class ProcessPrimeplayMessage implements ShouldQueue
             TrackingDashboard::updateOrCreate(
                 ['tracking_id' => $trackingId],
                 [
-                    'message_content' => $this->messageData,
+                    'tracking_data' => $this->messageData,
                     'source_system' => 'primeplay',
                     'received_at' => now(),
                 ]

@@ -18,15 +18,15 @@ class TrackingDashboard extends Model
      */
     protected $fillable = [
         'tracking_id',
-        'event_date',
-        'status',
-        'message_content',
+        'tracking_data',
         'source_system',
         'dataset_name',
         'team_name',
+        'event_date',
         'start_time',
         'end_time',
         'duration_minutes',
+        'status',
         'match_attempts',
         'last_match_attempt_at',
         'assigned_to_user_id',
@@ -40,8 +40,10 @@ class TrackingDashboard extends Model
      * @var array<string, string>
      */
     protected $casts = [
-        'message_content' => 'array',
+        'tracking_data' => 'array',
         'event_date' => 'date',
+        'start_time' => 'datetime',
+        'end_time' => 'datetime',
         'match_attempts' => 'integer',
         'duration_minutes' => 'integer',
         'last_match_attempt_at' => 'datetime',

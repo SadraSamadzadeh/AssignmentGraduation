@@ -5,7 +5,8 @@ namespace App\Jobs;
 use App\Models\TrackingDashboard;
 use App\Models\VideoDashboard;
 use App\Models\GlobalMatches;
-use App\Models\ConfirmedMatch;
+use App\Models\TeamMapping;
+use App\Models\MatchHistory;
 use App\Services\MatchingService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -54,46 +55,42 @@ class MatchUnmatchedData implements ShouldQueue
         
         // For each video, find best matching tracking using similarity
         foreach ($unmatchedVideos as $video) {
-            $videoData = is_string($video->message_content) ? json_decode($video->message_content, true) : $video->message_content;
-            $videoTeamId = $this->extractVideoTeamId($videoData);
+            $videoTeamId = $this->extractVideoTeamId($video->video_data);
             
             if ($videoTeamId) {
-                $confirmedMatch = ConfirmedMatch::where('video_team_id', $videoTeamId)->first();
+                $confirmedMatch = TeamMapping::where('video_team_id', $videoTeamId)
+                    ->where('status', 'active')
+                    ->first();
+                    
                 if ($confirmedMatch) {
                     $tracking = $unmatchedTracking->first(function($t) use ($confirmedMatch) {
-                        $trackingData = is_string($t->message_content) ? json_decode($t->message_content, true) : $t->message_content;
-                        $primeplayTeamId = $this->extractPrimeplayTeamId($trackingData);
+                        $primeplayTeamId = $this->extractPrimeplayTeamId($t->tracking_data);
                         return $primeplayTeamId === $confirmedMatch->primeplay_team_id;
                     });
                         
                     if ($tracking) {
-                        $trackingData = is_string($tracking->message_content) ? json_decode($tracking->message_content, true) : $tracking->message_content;
                         $this->createMatch(
                             $tracking,
                             $video,
-                            $trackingData,
-                            $videoData,
-                            ['score' => $confirmedMatch->match_score, 'breakdown' => $confirmedMatch->match_details]
+                            $tracking->tracking_data,
+                            $video->video_data,
+                            ['score' => $confirmedMatch->confidence_score, 'breakdown' => $confirmedMatch->match_details]
                         );
                         $matchCount++;
-                        Log::info('Match created from confirmed team match', [
+                        Log::info('Match created from confirmed team mapping', [
                             'video_team_id' => $videoTeamId,
                             'primeplay_team_id' => $confirmedMatch->primeplay_team_id,
-                            'score' => $confirmedMatch->match_score
+                            'score' => $confirmedMatch->confidence_score
                         ]);
                         continue;
                     }
                 }
             }
             
-            $videoData = is_string($video->message_content) 
-                ? json_decode($video->message_content, true) 
-                : $video->message_content;
+            $videoFormatted = $this->formatVideoData($video->video_data, $video);
             
-            $videoFormatted = $this->formatVideoData($videoData, $video);
-            
-            // Extract video date for pre-filtering
-            $videoDate = $this->extractDate($videoFormatted['starting_at']['date']);
+            // Use extracted date from database instead of JSON parsing
+            $videoDate = $video->event_date ? $video->event_date->format('Y-m-d') : null;
             
             // Get candidate tracking records from same day and adjacent days
             $candidates = $this->getCandidateTracking($trackingByDate, $videoDate);
@@ -117,11 +114,7 @@ class MatchUnmatchedData implements ShouldQueue
             
             // Compare video against pre-filtered candidates only
             foreach ($candidates as $tracking) {
-                $trackingData = is_string($tracking->message_content) 
-                    ? json_decode($tracking->message_content, true) 
-                    : $tracking->message_content;
-                
-                $trackingFormatted = $this->formatTrackingData($trackingData, $tracking);
+                $trackingFormatted = $this->formatTrackingData($tracking->tracking_data, $tracking);
                 
                 $result = $matchingService->compareTrackingAndVideo($trackingFormatted, $videoFormatted);
                 
@@ -145,16 +138,16 @@ class MatchUnmatchedData implements ShouldQueue
                     $bestScore = $result['score'];
                     $bestMatch = [
                         'tracking' => $tracking,
-                        'tracking_data' => $trackingData,
+                        'tracking_data' => $tracking->tracking_data,
                         'result' => $result
                     ];
                     
                     if ($result['score'] >= 80) {
-                        $videoTeamId = $this->extractVideoTeamId($videoData);
-                        $primeplayTeamId = $this->extractPrimeplayTeamId($trackingData);
+                        $videoTeamId = $this->extractVideoTeamId($video->video_data);
+                        $primeplayTeamId = $this->extractPrimeplayTeamId($tracking->tracking_data);
                         
                         if ($videoTeamId && $primeplayTeamId) {
-                            ConfirmedMatch::updateOrCreate(
+                            TeamMapping::updateOrCreate(
                                 [
                                     'video_team_id' => $videoTeamId,
                                     'primeplay_team_id' => $primeplayTeamId
@@ -176,7 +169,7 @@ class MatchUnmatchedData implements ShouldQueue
                         $bestMatch['tracking'], 
                         $video, 
                         $bestMatch['tracking_data'], 
-                        $videoData, 
+                        $video->video_data, 
                         $bestMatch['result']
                     );
                     $matchCount++;
@@ -217,15 +210,8 @@ class MatchUnmatchedData implements ShouldQueue
         $grouped = [];
         
         foreach ($trackingRecords as $tracking) {
-            $trackingData = is_string($tracking->message_content) 
-                ? json_decode($tracking->message_content, true) 
-                : $tracking->message_content;
-            
-            $date = $this->extractDate(
-                $trackingData['matchData']['start'] 
-                ?? $trackingData['matchData']['startTime'] 
-                ?? null
-            );
+            // Use extracted event_date from database instead of JSON parsing
+            $date = $tracking->event_date ? $tracking->event_date->format('Y-m-d') : null;
             
             if ($date) {
                 if (!isset($grouped[$date])) {
@@ -299,15 +285,12 @@ class MatchUnmatchedData implements ShouldQueue
      */
     protected function formatTrackingData(array $trackingData, $tracking): array
     {
-        $matchData = $trackingData['matchData'] ?? $trackingData;
-        
-        // Prefer database columns over JSONB data for time values
-        // as database columns are validated and normalized during extraction
+        // Use database extracted columns (validated and normalized)
         return [
             'id' => $tracking->tracking_id,
-            'startTime' => $tracking->start_time ?? $matchData['start'] ?? $matchData['startTime'] ?? now()->toIso8601String(),
-            'endTime' => $tracking->end_time ?? $matchData['end'] ?? $matchData['endTime'] ?? now()->toIso8601String(),
-            'teamName' => $tracking->team_name ?? $matchData['teamName'] ?? $matchData['name'] ?? '',
+            'startTime' => $tracking->start_time ? $tracking->start_time->toIso8601String() : now()->toIso8601String(),
+            'endTime' => $tracking->end_time ? $tracking->end_time->toIso8601String() : now()->toIso8601String(),
+            'teamName' => $tracking->team_name ?? '',
         ];
     }
     
@@ -317,53 +300,20 @@ class MatchUnmatchedData implements ShouldQueue
      */
     protected function formatVideoData(array $videoData, $video): array
     {
-        // Extract match data from the nested structure
-        $match = $videoData['match_data'] ?? $videoData['match'] ?? $videoData;
-        
-        // Extract date strings, handle both array and string formats
-        $startingAt = $match['starting_at'] ?? $match['atom_starting_at'] ?? now()->toIso8601String();
-        $stoppingAt = $match['stopping_at'] ?? $match['atom_stopping_at'] ?? now()->toIso8601String();
-        
-        // If starting_at is an array with a 'date' key, extract it
-        if (is_array($startingAt) && isset($startingAt['date'])) {
-            $startingAt = $startingAt['date'];
-        }
-        if (is_array($stoppingAt) && isset($stoppingAt['date'])) {
-            $stoppingAt = $stoppingAt['date'];
-        }
-        
-        // Prefer database columns for time values (validated and normalized)
-        $startingAt = $video->start_time ?? $startingAt;
-        $stoppingAt = $video->end_time ?? $stoppingAt;
-        
-        // Log for debugging
-        Log::debug('Formatting video data', [
-            'video_id' => $video->video_id,
-            'has_match_data' => isset($videoData['match_data']),
-            'starting_at' => $startingAt,
-            'home_name' => $video->home_club_name ?? $match['home']['name'] ?? 'MISSING',
-            'away_name' => $video->away_club_name ?? $match['away']['name'] ?? 'MISSING',
-        ]);
-        
-        return [
+        // Use database extracted columns (validated and normalized)
+        $formatted = [
             'id' => $video->video_id,
             'starting_at' => [
-                'date' => $startingAt,
+                'date' => $video->start_time ? $video->start_time->toIso8601String() : now()->toIso8601String()
             ],
             'stopping_at' => [
-                'date' => $stoppingAt,
+                'date' => $video->end_time ? $video->end_time->toIso8601String() : now()->toIso8601String()
             ],
-            'timezone' => $match['timezone'] ?? 'UTC',
-            'home' => [
-                'name' => $video->home_club_name ?? $match['home_team']['name'] ?? $match['home']['name'] ?? '',
-            ],
-            'away' => [
-                'name' => $video->away_club_name ?? $match['away_team']['name'] ?? $match['away']['name'] ?? '',
-            ],
-            'club' => [
-                'name' => $match['club']['name'] ?? $match['home_club']['name'] ?? '',
-            ],
+            'home_club' => ['name' => $video->home_club_name ?? ''],
+            'away_club' => ['name' => $video->away_club_name ?? ''],
         ];
+        
+        return $formatted;
     }
     
     /**
@@ -372,24 +322,44 @@ class MatchUnmatchedData implements ShouldQueue
     protected function createMatch($tracking, $video, array $trackingData, array $videoData, array $matchResult): void
     {
         DB::transaction(function () use ($tracking, $video, $trackingData, $videoData, $matchResult) {
-            GlobalMatches::create([
+            $match = GlobalMatches::create([
                 'global_match_id' => "match_{$tracking->tracking_id}_{$video->video_id}_" . now()->timestamp,
                 'tracking_id' => $tracking->tracking_id,
                 'video_id' => $video->video_id,
-                'match_score' => $matchResult['score'],
+                'tracking_data' => $trackingData,
+                'video_data' => $videoData,
+                'status' => $matchResult['score'] >= 85 ? 'confirmed' : 'pending_review',
                 'confidence_level' => $matchResult['confidence'],
+                'match_score' => $matchResult['score'],
+                'time_proximity_score' => $matchResult['breakdown']['time_proximity_score'] ?? null,
+                'duration_similarity_score' => $matchResult['breakdown']['duration_similarity_score'] ?? null,
+                'temporal_overlap_score' => $matchResult['breakdown']['temporal_overlap_score'] ?? null,
                 'match_details' => [
                     'match_type' => 'scheduled_matching',
                     'matched_by' => 'system',
                     'match_criteria' => 'similarity_algorithm',
                     'matched_at_job' => 'MatchUnmatchedData',
                     'reasons' => $matchResult['reasons'] ?? [],
+                    'breakdown' => $matchResult['breakdown'] ?? [],
                 ],
-                'tracking_data' => $trackingData,
-                'video_data' => $videoData,
-                'status' => $matchResult['score'] >= 85 ? 'confirmed' : 'pending_review',
-                'processed_by' => 'scheduled_job',
                 'matched_at' => now(),
+            ]);
+            
+            // Create match history entry
+            MatchHistory::create([
+                'global_match_id' => $match->id,
+                'action' => 'created',
+                'previous_status' => null,
+                'new_status' => $match->status,
+                'previous_score' => null,
+                'new_score' => $match->match_score,
+                'changes' => [
+                    'match_type' => 'scheduled_matching',
+                    'breakdown' => $matchResult['breakdown'] ?? [],
+                ],
+                'reason' => 'Automated match created by scheduled job',
+                'performed_by_user_id' => null,
+                'performed_at' => now(),
             ]);
             
             // Update status and delete records

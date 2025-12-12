@@ -24,7 +24,6 @@ class RabbitMQService
             );
             $this->channel = $this->connection->channel();
             
-            // Declare exchanges and queues
             $this->setupQueues();
             
             $this->isConnected = true;
@@ -51,26 +50,19 @@ class RabbitMQService
      */
     private function setupQueues(): void
     {
-        // Declare exchange for routing messages
         $this->channel->exchange_declare('matching_hub', 'direct', false, true, false);
         
         // Incoming queues from backends
         $this->channel->queue_declare('tracking_data_queue', false, true, false, false);
         $this->channel->queue_declare('video_data_queue', false, true, false, false);
         
-        // Response queues to backends
-        $this->channel->queue_declare('tracking_response_queue', false, true, false, false);
-        $this->channel->queue_declare('video_response_queue', false, true, false, false);
+        // $this->channel->queue_declare('tracking_response_queue', false, true, false, false);
+        // $this->channel->queue_declare('video_response_queue', false, true, false, false);
         
-        // Internal processing queue
-        $this->channel->queue_declare('matching_process_queue', false, true, false, false);
-        
-        // Bind queues to exchange
         $this->channel->queue_bind('tracking_data_queue', 'matching_hub', 'tracking.data');
         $this->channel->queue_bind('video_data_queue', 'matching_hub', 'video.data');
-        $this->channel->queue_bind('tracking_response_queue', 'matching_hub', 'tracking.response');
-        $this->channel->queue_bind('video_response_queue', 'matching_hub', 'video.response');
-        $this->channel->queue_bind('matching_process_queue', 'matching_hub', 'process.match');
+        // $this->channel->queue_bind('tracking_response_queue', 'matching_hub', 'tracking.response');
+        // $this->channel->queue_bind('video_response_queue', 'matching_hub', 'video.response');
     }
 
     /**
@@ -118,7 +110,7 @@ class RabbitMQService
             $queueName,
             '',
             false,
-            false, // no_ack = false (manual acknowledgment)
+            false,
             false,
             false,
             $callback
@@ -130,68 +122,35 @@ class RabbitMQService
             $this->channel->wait();
         }
     }
+    // /**
+    //  * Send response back to tracking backend
+    //  */
+    // public function sendTrackingResponse(array $responseData, string $requestId): void
+    // {
+    //     $message = [
+    //         'request_id' => $requestId,
+    //         'response_data' => $responseData,
+    //         'timestamp' => now()->toISOString(),
+    //         'hub_processed' => true
+    //     ];
 
-    /**
-     * Send tracking data to processing queue
-     */
-    public function sendTrackingData(array $trackingData, string $requestId): void
-    {
-        $message = [
-            'type' => 'tracking_data',
-            'request_id' => $requestId,
-            'data' => $trackingData,
-            'timestamp' => now()->toISOString(),
-            'source' => 'tracking_backend'
-        ];
+    //     $this->publishMessage('tracking.response', $message);
+    // }
 
-        $this->publishMessage('process.match', $message);
-    }
+    // /**
+    //  * Send response back to video backend
+    //  */
+    // public function sendVideoResponse(array $responseData, string $requestId): void
+    // {
+    //     $message = [
+    //         'request_id' => $requestId,
+    //         'response_data' => $responseData,
+    //         'timestamp' => now()->toISOString(),
+    //         'hub_processed' => true
+    //     ];
 
-    /**
-     * Send video data to processing queue
-     */
-    public function sendVideoData(array $videoData, string $requestId): void
-    {
-        $message = [
-            'type' => 'video_data',
-            'request_id' => $requestId,
-            'data' => $videoData,
-            'timestamp' => now()->toISOString(),
-            'source' => 'video_backend'
-        ];
-
-        $this->publishMessage('process.match', $message);
-    }
-
-    /**
-     * Send response back to tracking backend
-     */
-    public function sendTrackingResponse(array $responseData, string $requestId): void
-    {
-        $message = [
-            'request_id' => $requestId,
-            'response_data' => $responseData,
-            'timestamp' => now()->toISOString(),
-            'hub_processed' => true
-        ];
-
-        $this->publishMessage('tracking.response', $message);
-    }
-
-    /**
-     * Send response back to video backend
-     */
-    public function sendVideoResponse(array $responseData, string $requestId): void
-    {
-        $message = [
-            'request_id' => $requestId,
-            'response_data' => $responseData,
-            'timestamp' => now()->toISOString(),
-            'hub_processed' => true
-        ];
-
-        $this->publishMessage('video.response', $message);
-    }
+    //     $this->publishMessage('video.response', $message);
+    // }
 
     /**
      * Close connection

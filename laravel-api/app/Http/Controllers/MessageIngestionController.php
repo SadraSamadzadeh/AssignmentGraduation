@@ -2,7 +2,7 @@
 
 namespace App\Http\Controllers;
 
-use App\Jobs\ProcessIncomingMessage;
+use App\Jobs\DispatchRabbitMQMessage;
 use App\Services\RabbitMQService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -61,20 +61,21 @@ class MessageIngestionController extends Controller
     {
         try {
             $messageBody = json_decode($amqpMessage->body, true);
+            $routingKey = $amqpMessage->getRoutingKey();
             
-            Log::info('Received tracking message from RabbitMQ', [
-                'message_id' => $messageBody['id'] ?? 'unknown',
-                'team_name' => $messageBody['teamName'] ?? 'unknown'
+            Log::info('Received message from RabbitMQ', [
+                'routing_key' => $routingKey,
+                'message_id' => $messageBody['id'] ?? 'unknown'
             ]);
 
-            // Dispatch job to process the message asynchronously
-            ProcessIncomingMessage::dispatch($messageBody, 'tracking');
+            // Dispatch to central dispatcher which routes to appropriate handler
+            DispatchRabbitMQMessage::dispatch($messageBody, $routingKey);
 
             // Acknowledge the message
             $amqpMessage->ack();
 
         } catch (\Exception $e) {
-            Log::error('Failed to process tracking message', [
+            Log::error('Failed to process message', [
                 'error' => $e->getMessage()
             ]);
             
@@ -96,8 +97,8 @@ class MessageIngestionController extends Controller
                 'team_name' => $trackingData['teamName'] ?? 'unknown'
             ]);
 
-            // Process the tracking data
-            ProcessIncomingMessage::dispatch($trackingData, 'tracking');
+            // Dispatch through central dispatcher with tracking routing key
+            DispatchRabbitMQMessage::dispatch($trackingData, 'tracking.data');
 
             return response()->json([
                 'success' => true,
@@ -130,8 +131,8 @@ class MessageIngestionController extends Controller
                 'home_team' => $videoData['home']['name'] ?? 'unknown'
             ]);
 
-            // Process the video data
-            ProcessIncomingMessage::dispatch($videoData, 'video');
+            // Dispatch through central dispatcher with video routing key
+            DispatchRabbitMQMessage::dispatch($videoData, 'video.data');
 
             return response()->json([
                 'success' => true,

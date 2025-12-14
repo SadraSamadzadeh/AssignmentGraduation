@@ -1,0 +1,560 @@
+# =============================================================================
+# Docker Compose for Docker Swarm - Production Deployment
+# =============================================================================
+# Purpose: Define all services, networks, volumes, and configurations
+# This file is used with: docker stack deploy -c docker-compose.swarm.yml <stack-name>
+
+version: "3.8"
+
+# =============================================================================
+# SERVICES SECTION
+# =============================================================================
+# Defines all containers that run in the application stack
+services:
+    # ---------------------------------------------------------------------------
+    # PostgreSQL Database Service
+    # ---------------------------------------------------------------------------
+    # Purpose: Primary relational database for storing all application data
+    # Why separate: Database requires persistent storage and should not scale horizontally
+    # Replicas: 1 (single instance, scaling handled by read replicas in future)
+    postgres:
+        image: postgres:15-alpine
+
+        # Environment variables for PostgreSQL configuration
+        environment:
+            # POSTGRES_DB: Database name to create on first startup
+            POSTGRES_DB: assignment_graduation
+
+            # POSTGRES_USER: PostgreSQL superuser name
+            POSTGRES_USER: assignment_user
+
+            # POSTGRES_PASSWORD: Use Docker secret for security
+            # Secrets are encrypted and only available to authorized containers
+            POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+
+            # PGDATA: Data directory location inside container
+            PGDATA: /var/lib/postgresql/data/pgdata
+
+        # Docker secrets: Securely inject sensitive data
+        secrets:
+            - db_password
+
+        # Volumes: Persistent storage that survives container restarts
+        volumes:
+            # Named volume for database files
+            # Data persists even if container is destroyed
+            - postgres_data:/var/lib/postgresql/data
+
+        # Networks: Connect to overlay network for inter-service communication
+        networks:
+            - app-network
+
+        # Deployment configuration for Docker Swarm
+        deploy:
+            # replicas: Number of instances (1 for database, no horizontal scaling)
+            replicas: 1
+
+            # restart_policy: How to handle container failures
+            restart_policy:
+                condition: on-failure
+                delay: 5s
+                max_attempts: 3
+                window: 120s
+
+            # Resources: CPU and memory limits
+            resources:
+                limits:
+                    cpus: "2.0" # Max 2 CPU cores
+                    memory: 2G # Max 2GB RAM
+                reservations:
+                    cpus: "0.5" # Guaranteed 0.5 CPU cores
+                    memory: 512M # Guaranteed 512MB RAM
+
+            # Placement constraints: Where this service can run
+            # Uncomment below to pin database to specific node
+            # placement:
+            #   constraints:
+            #     - node.labels.database == true
+
+        # Health check: Verify database is responding
+        healthcheck:
+            test:
+                [
+                    "CMD-SHELL",
+                    "pg_isready -U assignment_user -d assignment_graduation",
+                ]
+            interval: 10s
+            timeout: 5s
+            retries: 5
+            start_period: 30s
+
+    # ---------------------------------------------------------------------------
+    # Redis Cache Service
+    # ---------------------------------------------------------------------------
+    # Purpose: In-memory cache for sessions, configuration, and temporary data
+    # Why separate: Cache should be centralized and shared across API replicas
+    # Replicas: 1 (single instance, sufficient for most workloads)
+    redis:
+        image: redis:7-alpine
+
+        # Command: Configure Redis with password and persistence
+        # --requirepass: Password authentication (from Docker secret)
+        # --appendonly yes: Enable AOF persistence (durability)
+        # --maxmemory 512mb: Max memory before eviction
+        # --maxmemory-policy allkeys-lru: Evict least recently used keys when full
+        command: >
+            sh -c "redis-server 
+            --requirepass $$(cat /run/secrets/redis_password)
+            --appendonly yes
+            --maxmemory 512mb
+            --maxmemory-policy allkeys-lru"
+
+        # Docker secrets for password
+        secrets:
+            - redis_password
+
+        # Volumes: Persist Redis data (AOF files)
+        volumes:
+            - redis_data:/data
+
+        # Networks: Connect to app network
+        networks:
+            - app-network
+
+        # Deployment configuration
+        deploy:
+            replicas: 1
+            restart_policy:
+                condition: on-failure
+                delay: 5s
+                max_attempts: 3
+            resources:
+                limits:
+                    cpus: "0.5"
+                    memory: 512M
+                reservations:
+                    cpus: "0.1"
+                    memory: 128M
+
+        # Health check: Verify Redis is responding
+        healthcheck:
+            test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+            interval: 10s
+            timeout: 3s
+            retries: 5
+            start_period: 10s
+
+    # ---------------------------------------------------------------------------
+    # RabbitMQ Message Queue Service
+    # ---------------------------------------------------------------------------
+    # Purpose: Message broker for asynchronous job processing
+    # Why separate: Queue should be centralized, handles job distribution to workers
+    # Replicas: 1 (single instance, clustering can be added later)
+    rabbitmq:
+        image: rabbitmq:3-management-alpine
+
+        # Environment variables for RabbitMQ
+        environment:
+            # Default user credentials
+            RABBITMQ_DEFAULT_USER: guest
+
+            # Password (Note: RabbitMQ 3.x no longer supports _FILE env vars)
+            # In production, use a stronger password and consider RabbitMQ access control
+            RABBITMQ_DEFAULT_PASS: rabbitmq_password_123
+
+            # Virtual host (namespace for queues)
+            RABBITMQ_DEFAULT_VHOST: /
+
+        # Volumes: Persist queue data
+        volumes:
+            - rabbitmq_data:/var/lib/rabbitmq
+
+        # Networks
+        networks:
+            - app-network
+
+        # Ports: Expose RabbitMQ management UI
+        # 15672: Web-based management interface
+        # Only expose in development, use reverse proxy in production
+        ports:
+            - "15672:15672"
+
+        # Deployment configuration
+        deploy:
+            replicas: 1
+            restart_policy:
+                condition: on-failure
+                delay: 10s
+                max_attempts: 3
+            resources:
+                limits:
+                    cpus: "1.0"
+                    memory: 1G
+                reservations:
+                    cpus: "0.25"
+                    memory: 256M
+
+        # Health check: Verify RabbitMQ is responding
+        healthcheck:
+            test: ["CMD", "rabbitmq-diagnostics", "ping"]
+            interval: 30s
+            timeout: 10s
+            retries: 5
+            start_period: 40s
+
+    # ---------------------------------------------------------------------------
+    # Laravel API Service
+    # ---------------------------------------------------------------------------
+    # Purpose: Handle HTTP requests, serve API endpoints, dispatch jobs
+    # Why separate: API is stateless and can scale horizontally
+    # Replicas: 3 (scalable to 10+ based on load)
+    api:
+        # Build from Dockerfile using 'production' stage
+        image: assignment-api:latest
+        build:
+            context: .
+            dockerfile: Dockerfile
+            target: production
+
+        # Environment variables for Laravel
+        environment:
+            # Application settings
+            APP_NAME: "USF.Sport Integration"
+            APP_ENV: production
+            APP_DEBUG: "false"
+            APP_URL: http://localhost
+            APP_KEY: base64:YourSecretAppKeyHere1234567890ABCDEF
+
+            # Database connection
+            DB_CONNECTION: pgsql
+            DB_HOST: postgres # Service name as hostname (DNS resolution)
+            DB_PORT: 5432
+            DB_DATABASE: assignment_graduation
+            DB_USERNAME: assignment_user
+            DB_PASSWORD: postgres_password_123
+
+            # Redis connection
+            CACHE_DRIVER: redis
+            SESSION_DRIVER: redis
+            REDIS_HOST: redis # Service name as hostname
+            REDIS_PORT: 6379
+            REDIS_PASSWORD: redis_password_123
+
+            # RabbitMQ connection
+            QUEUE_CONNECTION: rabbitmq
+            RABBITMQ_HOST: rabbitmq # Service name as hostname
+            RABBITMQ_PORT: 5672
+            RABBITMQ_USER: guest
+            RABBITMQ_PASSWORD: rabbitmq_password_123
+            RABBITMQ_VHOST: /
+            RABBITMQ_QUEUE: default
+
+            # Logging
+            LOG_CHANNEL: stack
+            LOG_LEVEL: info
+
+            # Timezone
+            TZ: Europe/Amsterdam
+
+        # Docker secrets
+        secrets:
+            - app_key
+            - db_password
+            - redis_password
+            - rabbitmq_password
+
+        # Networks
+        networks:
+            - app-network
+
+        # Ports: Expose HTTP port through Swarm ingress
+        # Swarm automatically load balances across all replicas
+        ports:
+            - "80:80"
+
+        # Dependencies: Wait for these services before starting
+        # Note: Docker Swarm doesn't enforce depends_on, use healthchecks instead
+        depends_on:
+            - postgres
+            - redis
+            - rabbitmq
+
+        # Deployment configuration
+        deploy:
+            # replicas: Number of API containers (horizontal scaling)
+            # Start with 3, scale up to 10+ based on traffic
+            replicas: 3
+
+            # update_config: How to update service with zero downtime
+            update_config:
+                parallelism: 1 # Update 1 container at a time
+                delay: 10s # Wait 10s between updates
+                failure_action: rollback # Rollback if update fails
+                order: start-first # Start new container before stopping old
+
+            # rollback_config: How to rollback failed deployments
+            rollback_config:
+                parallelism: 1
+                delay: 5s
+
+            # restart_policy: When to restart containers
+            restart_policy:
+                condition: on-failure
+                delay: 5s
+                max_attempts: 3
+                window: 120s
+
+            # Resources: Per-container limits
+            resources:
+                limits:
+                    cpus: "1.0" # Max 1 CPU core per container
+                    memory: 512M # Max 512MB per container
+                reservations:
+                    cpus: "0.25" # Guaranteed 0.25 CPU per container
+                    memory: 256M # Guaranteed 256MB per container
+
+            # labels: Metadata for service discovery/monitoring
+            labels:
+                - "traefik.enable=true"
+                - "traefik.http.routers.api.rule=Host(`api.localhost`)"
+
+        # Health check: Verify API is responding
+        healthcheck:
+            test: ["CMD", "curl", "-f", "http://localhost/api/health"]
+            interval: 30s
+            timeout: 3s
+            retries: 3
+            start_period: 40s
+
+    # ---------------------------------------------------------------------------
+    # Laravel Queue Worker Service
+    # ---------------------------------------------------------------------------
+    # Purpose: Process asynchronous jobs from RabbitMQ
+    # Why separate: Workers are CPU-intensive and need different scaling than API
+    # Replicas: 5 (scalable to 20+ based on queue depth)
+    worker:
+        # Build from Dockerfile using 'worker' stage
+        image: assignment-worker:latest
+        build:
+            context: .
+            dockerfile: Dockerfile
+            target: worker
+
+        # Environment variables (same as API, but no HTTP settings)
+        environment:
+            APP_NAME: "USF.Sport Worker"
+            APP_ENV: production
+            APP_DEBUG: "false"
+            APP_KEY: base64:YourSecretAppKeyHere1234567890ABCDEF
+
+            # Database
+            DB_CONNECTION: pgsql
+            DB_HOST: postgres
+            DB_PORT: 5432
+            DB_DATABASE: assignment_graduation
+            DB_USERNAME: assignment_user
+            DB_PASSWORD: postgres_password_123
+
+            # Redis
+            CACHE_DRIVER: redis
+            REDIS_HOST: redis
+            REDIS_PORT: 6379
+            REDIS_PASSWORD: redis_password_123
+
+            # RabbitMQ
+            QUEUE_CONNECTION: rabbitmq
+            RABBITMQ_HOST: rabbitmq
+            RABBITMQ_PORT: 5672
+            RABBITMQ_USER: guest
+            RABBITMQ_PASSWORD: rabbitmq_password_123
+            RABBITMQ_VHOST: /
+            RABBITMQ_QUEUE: default
+
+            # Logging
+            LOG_CHANNEL: stack
+            LOG_LEVEL: info
+
+            TZ: Europe/Amsterdam
+
+        # Docker secrets
+        secrets:
+            - app_key
+            - db_password
+            - redis_password
+            - rabbitmq_password
+
+        # Networks
+        networks:
+            - app-network
+
+        # Dependencies
+        depends_on:
+            - postgres
+            - redis
+            - rabbitmq
+
+        # Deployment configuration
+        deploy:
+            # replicas: Number of worker containers
+            # More workers = higher throughput, but more resource usage
+            replicas: 5
+
+            # update_config: Rolling update for workers
+            update_config:
+                parallelism: 2 # Update 2 workers at a time
+                delay: 10s
+                failure_action: rollback
+
+            restart_policy:
+                condition: on-failure
+                delay: 5s
+                max_attempts: 3
+                window: 120s
+
+            # Resources: Workers need less memory than API
+            resources:
+                limits:
+                    cpus: "0.5" # Max 0.5 CPU per worker
+                    memory: 512M # Max 512MB per worker
+                reservations:
+                    cpus: "0.1"
+                    memory: 256M
+
+    # ---------------------------------------------------------------------------
+    # Laravel Scheduler Service
+    # ---------------------------------------------------------------------------
+    # Purpose: Run Laravel's task scheduler (cron jobs)
+    # Why separate: Scheduler should run exactly once, not scaled
+    # Replicas: 1 (never scale, ensures tasks don't run multiple times)
+    scheduler:
+        # Build from Dockerfile using 'scheduler' stage
+        image: assignment-scheduler:latest
+        build:
+            context: .
+            dockerfile: Dockerfile
+            target: scheduler
+
+        # Environment variables (same as workers)
+        environment:
+            APP_NAME: "USF.Sport Scheduler"
+            APP_ENV: production
+            APP_DEBUG: "false"
+            APP_KEY: base64:YourSecretAppKeyHere1234567890ABCDEF
+
+            DB_CONNECTION: pgsql
+            DB_HOST: postgres
+            DB_PORT: 5432
+            DB_DATABASE: assignment_graduation
+            DB_USERNAME: assignment_user
+            DB_PASSWORD: postgres_password_123
+
+            CACHE_DRIVER: redis
+            REDIS_HOST: redis
+            REDIS_PORT: 6379
+            REDIS_PASSWORD: redis_password_123
+
+            QUEUE_CONNECTION: rabbitmq
+            RABBITMQ_HOST: rabbitmq
+            RABBITMQ_PORT: 5672
+            RABBITMQ_USER: guest
+            RABBITMQ_VHOST: /
+
+            LOG_CHANNEL: stack
+            LOG_LEVEL: info
+
+            TZ: Europe/Amsterdam
+
+        # Docker secrets
+        secrets:
+            - app_key
+            - db_password
+            - redis_password
+            - rabbitmq_password
+
+        # Networks
+        networks:
+            - app-network
+
+        # Dependencies
+        depends_on:
+            - postgres
+            - redis
+            - rabbitmq
+
+        # Deployment configuration
+        deploy:
+            # replicas: MUST be 1 (prevents duplicate cron execution)
+            replicas: 1
+
+            restart_policy:
+                condition: on-failure
+                delay: 5s
+                max_attempts: 3
+
+            # Resources: Scheduler is lightweight
+            resources:
+                limits:
+                    cpus: "0.25"
+                    memory: 256M
+                reservations:
+                    cpus: "0.1"
+                    memory: 128M
+
+# =============================================================================
+# NETWORKS SECTION
+# =============================================================================
+# Defines virtual networks for service communication
+networks:
+    # app-network: Overlay network for all services
+    # Overlay networks enable communication across multiple Docker hosts
+    # Encrypted by default in Swarm mode for security
+    app-network:
+        driver: overlay
+        # attachable: Allows standalone containers to connect (useful for debugging)
+        attachable: true
+
+# =============================================================================
+# VOLUMES SECTION
+# =============================================================================
+# Defines persistent storage volumes
+volumes:
+    # postgres_data: PostgreSQL database files
+    # Survives container restarts and updates
+    postgres_data:
+        driver: local
+
+    # redis_data: Redis AOF persistence files
+    # Survives container restarts
+    redis_data:
+        driver: local
+
+    # rabbitmq_data: RabbitMQ queue data
+    # Survives container restarts
+    rabbitmq_data:
+        driver: local
+
+# =============================================================================
+# SECRETS SECTION
+# =============================================================================
+# Defines Docker secrets (encrypted sensitive data)
+# Secrets must be created before deploying: docker secret create <name> <file>
+secrets:
+    # app_key: Laravel application key (encryption, sessions)
+    # Create with: echo "base64:..." | docker secret create app_key -
+    app_key:
+        external: true
+
+    # db_password: PostgreSQL password
+    # Create with: openssl rand -base64 32 | docker secret create db_password -
+    db_password:
+        external: true
+
+    # redis_password: Redis authentication password
+    # Create with: openssl rand -base64 32 | docker secret create redis_password -
+    redis_password:
+        external: true
+
+    # rabbitmq_password: RabbitMQ authentication password
+    # Create with: openssl rand -base64 32 | docker secret create rabbitmq_password -
+    rabbitmq_password:
+        external: true

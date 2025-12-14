@@ -1,0 +1,40 @@
+# ConfigMap - Non-sensitive configuration
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: usfsport
+data:
+
+  APP_NAME: "USF Sport Assignment"
+  APP_ENV: "production"
+  APP_DEBUG: "false"
+  APP_URL: "http://localhost"
+  
+
+  DB_CONNECTION: "pgsql"
+  DB_HOST: "postgres"
+  DB_PORT: "5432"
+  DB_DATABASE: "assignment_graduation"
+  
+
+  REDIS_HOST: "redis"
+  REDIS_PORT: "6379"
+  REDIS_DB: "0"
+  
+
+  RABBITMQ_HOST: "rabbitmq"
+  RABBITMQ_PORT: "5672"
+  RABBITMQ_VHOST: "/"
+  
+
+  QUEUE_CONNECTION: "rabbitmq"
+  
+
+  CACHE_DRIVER: "redis"
+  SESSION_DRIVER: "cookie"
+  
+
+  LOG_CHANNEL: "stderr"
+  LOG_LEVEL: "info"

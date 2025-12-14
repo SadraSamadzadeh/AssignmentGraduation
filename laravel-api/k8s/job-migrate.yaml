@@ -1,0 +1,71 @@
+# Database Migration Job
+# Run this ONCE after deploying everything:
+# kubectl apply -f k8s/job-migrate.yaml
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-migrate
+  namespace: usfsport
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+    
+      - name: wait-for-db
+        image: postgres:15-alpine
+        command:
+        - sh
+        - -c
+        - |
+          until pg_isready -h postgres -U assignment_user; do
+            echo "Waiting for database..."
+            sleep 2
+          done
+          echo "Database is ready!"
+      
+      containers:
+      - name: migrate
+        image: assignment-api:latest
+        imagePullPolicy: Never
+        command:
+        - php
+        - artisan
+        - migrate
+        - --force
+        envFrom:
+        - configMapRef:
+            name: app-config
+        env:
+        - name: APP_KEY
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: APP_KEY
+        - name: DB_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: database-secrets
+              key: DB_USERNAME
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: database-secrets
+              key: DB_PASSWORD
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: redis-secrets
+              key: REDIS_PASSWORD
+        - name: RABBITMQ_USER
+          valueFrom:
+            secretKeyRef:
+              name: rabbitmq-secrets
+              key: RABBITMQ_USER
+        - name: RABBITMQ_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: rabbitmq-secrets
+              key: RABBITMQ_PASSWORD
+  backoffLimit: 3

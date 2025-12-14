@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: usfsport
+  labels:
+    name: usfsport
+    environment: production

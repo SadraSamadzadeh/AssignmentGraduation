@@ -2,7 +2,6 @@
 
 use Illuminate\Support\Facades\Route;
 
-// Root endpoint - API information
 Route::get('/', function () {
     return response()->json([
         'name' => 'Laravel Matching API',

@@ -77,7 +77,7 @@ class MatchingService
 
         // STAGE 3: Temporal Overlap (10% weight - FINAL VERIFICATION)
         $overlapScore = $this->calculateTemporalOverlap($trackingData, $videoData);
-        $overlapWeight = 10;
+        $overlapWeight =  10;
         $score += $overlapScore * ($overlapWeight / 100);
         $reasons[] = "Temporal overlap: {$overlapScore}/100";
         $breakdown['temporal_overlap'] = [
@@ -97,8 +97,8 @@ class MatchingService
     }
 
     /**
-     * Calculate time proximity with enhanced granularity
-     * More forgiving for same-day matches, stricter for different days
+     * Calculate time proximity based on actual session start times
+     * Since timestamps represent actual start times, matches should be very close
      */
     private function calculateTimeProximity(array $trackingData, array $videoData): float
     {
@@ -106,29 +106,29 @@ class MatchingService
         $videoStart = $this->normalizeToUTC($videoData['starting_at']['date'], $videoData['timezone'] ?? 'UTC');
         
         $timeDiffMinutes = abs($trackingStart->getTimestamp() - $videoStart->getTimestamp()) / 60;
-        $timeDiffHours = $timeDiffMinutes / 60;
         
-        // Check if same day
-        $sameDay = $trackingStart->format('Y-m-d') === $videoStart->format('Y-m-d');
+        // Scoring thresholds: [max_minutes, score]
+        $thresholds = [
+            [5, 100],    // Within 5 minutes - perfect match
+            [10, 95],    // Within 10 minutes - excellent
+            [15, 90],    // Within 15 minutes - very good
+            [30, 80],    // Within 30 minutes - good
+            [45, 70],    // Within 45 minutes - acceptable
+            [60, 60],    // Within 1 hour - marginal
+            [90, 50],    // Within 90 minutes - unlikely same match
+            [120, 40],   // Within 2 hours - probably different
+            [180, 30],   // Within 3 hours - likely different
+            [360, 20],   // Within 6 hours - very unlikely
+            [720, 10],   // Within 12 hours - different matches
+        ];
         
-        // Enhanced scoring with day-awareness
-        if ($timeDiffMinutes <= 5) return 100;      // Within 5 minutes - perfect match
-        if ($timeDiffMinutes <= 15) return 95;      // Within 15 minutes - excellent
-        if ($timeDiffMinutes <= 30) return 90;      // Within 30 minutes - very good
-        if ($timeDiffMinutes <= 60) return 85;      // Within 1 hour - good
-        
-        if ($sameDay) {
-            // Same day - more forgiving
-            if ($timeDiffHours <= 2) return 75;     // Within 2 hours
-            if ($timeDiffHours <= 4) return 60;     // Within 4 hours
-            if ($timeDiffHours <= 8) return 45;     // Within 8 hours
-            return 30;                              // Same day but large difference
-        } else {
-            // Different days - much stricter
-            if ($timeDiffHours <= 24) return 40;    // Within 24 hours
-            if ($timeDiffHours <= 48) return 20;    // Within 48 hours
-            return 0;                               // More than 2 days - no match
+        foreach ($thresholds as [$minutes, $score]) {
+            if ($timeDiffMinutes <= $minutes) {
+                return $score;
+            }
         }
+        
+        return 0; // More than 12 hours - no match
     }
 
     /**
@@ -157,15 +157,24 @@ class MatchingService
             $minDuration = min($trackingDuration, $videoDuration);
             $similarity = ($minDuration / $maxDuration) * 100;
             
-            // Apply threshold penalties
             $diffPercent = abs($trackingDuration - $videoDuration) / $maxDuration * 100;
             
-            if ($diffPercent <= 5) return 100;   // Within 5% - perfect
-            if ($diffPercent <= 10) return 90;   // Within 10% - excellent
-            if ($diffPercent <= 20) return 75;   // Within 20% - good
-            if ($diffPercent <= 35) return 55;   // Within 35% - acceptable
-            if ($diffPercent <= 50) return 35;   // Within 50% - poor
-            return 15;                           // More than 50% difference
+            // Scoring thresholds: [max_percent_diff, score]
+            $thresholds = [
+                [5, 100],    // Within 5% - perfect
+                [10, 90],    // Within 10% - excellent
+                [20, 75],    // Within 20% - good
+                [35, 55],    // Within 35% - acceptable
+                [50, 35],    // Within 50% - poor
+            ];
+            
+            foreach ($thresholds as [$percent, $score]) {
+                if ($diffPercent <= $percent) {
+                    return $score;
+                }
+            }
+            
+            return 15; // More than 50% difference
             
         } catch (\Exception $e) {
             return 50; // Neutral score on error

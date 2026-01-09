@@ -1,8 +1,9 @@
 # ============================================================================
-# Docker Compose for LOCAL DEVELOPMENT
+# Docker Compose - LOCAL DEVELOPMENT ONLY
 # ============================================================================
-# This is a SIMPLE setup for development. Just run: docker-compose up
-# Everything runs in separate containers but connects automatically via Docker networking
+# For DEVELOPMENT: Use this file (docker-compose up -d)
+# For PRODUCTION: Use Kubernetes manifests in k8s/ folder
+# ============================================================================
 
 version: '3.8'
 
@@ -18,9 +19,10 @@ services:
       POSTGRES_USER: assignment_user
       POSTGRES_PASSWORD: postgres_password_123
     ports:
-      - "5432:5432"  # Expose to host so you can connect with DB tools
+      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./database/init:/docker-entrypoint-initdb.d
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U assignment_user -d assignment_graduation"]
       interval: 10s
@@ -34,10 +36,10 @@ services:
     image: redis:7-alpine
     container_name: assignment_redis
     ports:
-      - "6379:6379"  # Expose to host
+      - "6379:6379"
     command: redis-server --requirepass redis_password_123
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "--pass", "redis_password_123", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -52,8 +54,8 @@ services:
       RABBITMQ_DEFAULT_USER: guest
       RABBITMQ_DEFAULT_PASS: rabbitmq_password_123
     ports:
-      - "5672:5672"   # AMQP port
-      - "15672:15672" # Management UI - http://localhost:15672
+      - "5672:5672"   # AMQP
+      - "15672:15672" # Management UI
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "ping"]
       interval: 30s
@@ -61,7 +63,7 @@ services:
       retries: 5
 
   # ---------------------------------------------------------------------------
-  # Laravel API (Nginx + PHP-FPM)
+  # Laravel API
   # ---------------------------------------------------------------------------
   api:
     build:
@@ -76,45 +78,13 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
-    environment:
-      # Application
-      APP_NAME: "USF Sport Assignment"
-      APP_ENV: local
-      APP_KEY: base64:YourSecretAppKeyHere1234567890ABCDEF
-      APP_DEBUG: "true"
-      APP_URL: http://localhost
-
-      # Database
-      DB_CONNECTION: pgsql
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_DATABASE: assignment_graduation
-      DB_USERNAME: assignment_user
-      DB_PASSWORD: postgres_password_123
-
-      # Cache (Redis)
-      CACHE_DRIVER: redis
-      SESSION_DRIVER: redis
-      REDIS_HOST: redis
-      REDIS_PASSWORD: redis_password_123
-      REDIS_PORT: 6379
-
-      # Queue (RabbitMQ)
-      QUEUE_CONNECTION: rabbitmq
-      RABBITMQ_HOST: rabbitmq
-      RABBITMQ_PORT: 5672
-      RABBITMQ_USER: guest
-      RABBITMQ_PASSWORD: rabbitmq_password_123
-      RABBITMQ_VHOST: /
-      RABBITMQ_QUEUE: default
-
-      # Logging
-      LOG_CHANNEL: stack
-      LOG_LEVEL: debug
+    env_file:
+      - .env.local
     ports:
-      - "80:80"  # Access API at http://localhost
+      - "80:80"
     volumes:
-      - ./storage:/var/www/html/storage  # Persist logs
+      - ./storage:/var/www/html/storage
+      - ./public:/var/www/html/public
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost/api/health"]
       interval: 30s
@@ -123,7 +93,7 @@ services:
       start_period: 40s
 
   # ---------------------------------------------------------------------------
-  # Laravel Queue Workers
+  # Laravel Queue Worker
   # ---------------------------------------------------------------------------
   worker:
     build:
@@ -135,41 +105,13 @@ services:
       - postgres
       - redis
       - rabbitmq
-    environment:
-      # Same as API
-      APP_NAME: "USF Sport Assignment"
-      APP_ENV: local
-      APP_KEY: base64:YourSecretAppKeyHere1234567890ABCDEF
-      APP_DEBUG: "true"
-      
-      DB_CONNECTION: pgsql
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_DATABASE: assignment_graduation
-      DB_USERNAME: assignment_user
-      DB_PASSWORD: postgres_password_123
-      
-      CACHE_DRIVER: redis
-      SESSION_DRIVER: redis
-      REDIS_HOST: redis
-      REDIS_PASSWORD: redis_password_123
-      REDIS_PORT: 6379
-      
-      QUEUE_CONNECTION: rabbitmq
-      RABBITMQ_HOST: rabbitmq
-      RABBITMQ_PORT: 5672
-      RABBITMQ_USER: guest
-      RABBITMQ_PASSWORD: rabbitmq_password_123
-      RABBITMQ_VHOST: /
-      RABBITMQ_QUEUE: default
-      
-      LOG_CHANNEL: stack
-      LOG_LEVEL: debug
+    env_file:
+      - .env.local
     volumes:
       - ./storage:/var/www/html/storage
 
   # ---------------------------------------------------------------------------
-  # Laravel Scheduler (Cron)
+  # Laravel Scheduler
   # ---------------------------------------------------------------------------
   scheduler:
     build:
@@ -180,32 +122,11 @@ services:
     depends_on:
       - postgres
       - redis
-    environment:
-      # Same as API
-      APP_NAME: "USF Sport Assignment"
-      APP_ENV: local
-      APP_KEY: base64:YourSecretAppKeyHere1234567890ABCDEF
-      APP_DEBUG: "true"
-      
-      DB_CONNECTION: pgsql
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_DATABASE: assignment_graduation
-      DB_USERNAME: assignment_user
-      DB_PASSWORD: postgres_password_123
-      
-      CACHE_DRIVER: redis
-      SESSION_DRIVER: redis
-      REDIS_HOST: redis
-      REDIS_PASSWORD: redis_password_123
-      REDIS_PORT: 6379
-      
-      LOG_CHANNEL: stack
-      LOG_LEVEL: debug
+    env_file:
+      - .env.local
     volumes:
       - ./storage:/var/www/html/storage
 
-# Volumes for data persistence
 volumes:
   postgres_data:
     driver: local

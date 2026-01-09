@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\TrackingDashboard;
+use App\Models\Player;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -63,6 +64,9 @@ class ProcessPrimeplayMessage implements ShouldQueue
         try {
             // Store tracking data first
             $trackingDashboard = $this->storeTemporaryTracking($datasetId);
+            
+            // Extract and store player data from the event
+            $this->extractAndStorePlayers($trackingDashboard, $datasetId);
             
             // Attempt immediate matching using MatchCoordinator
             // MatchCoordinator will check team mapping first, then similarity
@@ -156,6 +160,97 @@ class ProcessPrimeplayMessage implements ShouldQueue
         ]);
         
         return $trackingDashboard;
+    }
+
+    /**
+     * Extract and store player data from Primeplay event
+     * 
+     * @param TrackingDashboard $trackingDashboard
+     * @param string $datasetId
+     * @return void
+     */
+    protected function extractAndStorePlayers(TrackingDashboard $trackingDashboard, string $datasetId): void
+    {
+        try {
+            // Extract players from message data
+            $players = $this->messageData['matchData']['players'] 
+                ?? $this->messageData['players'] 
+                ?? $this->messageData['matchData']['roster']
+                ?? [];
+            
+            if (empty($players)) {
+                Log::debug('No player data found in Primeplay event', [
+                    'dataset_id' => $datasetId
+                ]);
+                return;
+            }
+
+            $playersCreated = 0;
+            $playersUpdated = 0;
+            
+            foreach ($players as $playerData) {
+                // Ensure player has required fields
+                $deviceId = $playerData['device_id'] 
+                    ?? $playerData['deviceId'] 
+                    ?? $playerData['sensor_id']
+                    ?? null;
+                
+                if (!$deviceId) {
+                    Log::warning('Player missing device_id, skipping', [
+                        'player_data' => $playerData,
+                        'dataset_id' => $datasetId
+                    ]);
+                    continue;
+                }
+
+                // Prepare player data
+                $normalizedPlayerData = [
+                    'device_id' => $deviceId,
+                    'name' => $playerData['name'] 
+                        ?? $playerData['player_name'] 
+                        ?? $playerData['fullName']
+                        ?? 'Unknown Player',
+                    'jersey_number' => $playerData['jersey_number'] 
+                        ?? $playerData['number'] 
+                        ?? $playerData['jerseyNumber']
+                        ?? null,
+                    'position' => $playerData['position'] ?? null,
+                    'team_name' => $playerData['team_name'] 
+                        ?? $playerData['team'] 
+                        ?? $this->messageData['matchData']['teamName']
+                        ?? null,
+                ];
+
+                // Create or update player
+                $player = Player::findOrCreatePlayer(
+                    $normalizedPlayerData,
+                    $datasetId,
+                    $trackingDashboard->id
+                );
+
+                if ($player->wasRecentlyCreated) {
+                    $playersCreated++;
+                } else {
+                    $playersUpdated++;
+                }
+            }
+
+            Log::info('Player data extracted and stored', [
+                'dataset_id' => $datasetId,
+                'tracking_dashboard_id' => $trackingDashboard->id,
+                'players_created' => $playersCreated,
+                'players_updated' => $playersUpdated,
+                'total_players' => count($players)
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Failed to extract player data from Primeplay event', [
+                'dataset_id' => $datasetId,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            // Don't throw - player extraction failure shouldn't stop tracking processing
+        }
     }
 
     public function failed(\Throwable $exception): void

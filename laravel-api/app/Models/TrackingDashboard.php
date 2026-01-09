@@ -60,6 +60,14 @@ class TrackingDashboard extends Model
     }
 
     /**
+     * Get the players associated with this tracking record.
+     */
+    public function players()
+    {
+        return $this->hasMany(Player::class, 'tracking_dashboard_id');
+    }
+
+    /**
      * Increment match attempts.
      */
     public function incrementMatchAttempts()

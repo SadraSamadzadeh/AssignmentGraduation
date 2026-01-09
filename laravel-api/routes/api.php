@@ -3,6 +3,7 @@
 use App\Http\Controllers\MatchController;
 use App\Http\Controllers\MessageIngestionController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\PlayerController;
 use Illuminate\Support\Facades\Route;
 
 Route::post('/match', [MatchController::class, 'match']);
@@ -23,4 +24,13 @@ Route::prefix('dashboard')->group(function () {
     Route::get('/video/{videoId}/cache', [DashboardController::class, 'getCachedVideo']);
     Route::get('/cache/unmatched', [DashboardController::class, 'getUnmatchedCache']);
     Route::get('/stats', [DashboardController::class, 'getDashboardStats']);
+});
+
+Route::prefix('players')->group(function () {
+    Route::get('/', [PlayerController::class, 'getAllPlayers']);
+    Route::get('/search', [PlayerController::class, 'searchPlayers']);
+    Route::get('/tracking/{trackingId}', [PlayerController::class, 'getPlayersByTracking']);
+    Route::get('/dataset/{datasetId}', [PlayerController::class, 'getPlayersByDataset']);
+    Route::get('/device/{deviceId}', [PlayerController::class, 'getPlayerByDevice']);
+    Route::post('/matched-data', [PlayerController::class, 'getPlayerMatchedData']);
 });

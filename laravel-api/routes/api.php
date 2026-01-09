@@ -4,7 +4,18 @@ use App\Http\Controllers\MatchController;
 use App\Http\Controllers\MessageIngestionController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\PlayerController;
+use App\Http\Controllers\AuthController;
 use Illuminate\Support\Facades\Route;
+
+// Public routes
+Route::post('/login', [AuthController::class, 'login']);
+
+// Protected routes
+Route::middleware('auth:sanctum')->group(function () {
+    Route::post('/logout', [AuthController::class, 'logout']);
+    Route::get('/me', [AuthController::class, 'me']);
+    Route::post('/external-api', [AuthController::class, 'externalApiCall']);
+});
 
 Route::post('/match', [MatchController::class, 'match']);
 Route::get('/test', [MatchController::class, 'test']);

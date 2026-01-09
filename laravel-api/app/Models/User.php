@@ -21,6 +21,10 @@ class User extends Authenticatable
         'email',
         'password',
         'role',
+        'auth_system',
+        'external_user_id',
+        'external_credentials',
+        'external_token_expires_at',
         'last_login_at',
     ];
 
@@ -42,6 +46,8 @@ class User extends Authenticatable
     protected $casts = [
         'email_verified_at' => 'datetime',
         'last_login_at' => 'datetime',
+        'external_credentials' => 'array',
+        'external_token_expires_at' => 'datetime',
         'password' => 'hashed',
     ];
 

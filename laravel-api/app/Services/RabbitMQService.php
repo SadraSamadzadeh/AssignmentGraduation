@@ -37,18 +37,12 @@ class RabbitMQService
         }
     }
     
-    /**
-     * Check if RabbitMQ is connected
-     */
     public function isConnected(): bool
     {
         return $this->isConnected;
     }
 
-    /**
-     * Setup RabbitMQ queues and exchanges for the hub
-     */
-    private function setupQueues(): void
+    public function setupQueues(): void
     {
         $this->channel->exchange_declare('matching_hub', 'direct', false, true, false);
         
@@ -94,10 +88,7 @@ class RabbitMQService
         ]);
     }
 
-    /**
-     * Consume messages from a specific queue
-     */
-    public function consumeQueue(string $queueName, callable $callback): void
+    public function consume(string $queue, callable $callback): void
     {
         if (!$this->isConnected) {
             Log::warning('Cannot consume queue - RabbitMQ not connected', [

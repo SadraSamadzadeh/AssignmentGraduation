@@ -18,19 +18,11 @@
     </source>
     <php>
         <env name="APP_ENV" value="testing"/>
+        <env name="APP_KEY" value="base64:1Qqt5xp6EyqJ3HQthscm6UI4dJWwXgtIcZRaG4nTcPY="/>
         <env name="BCRYPT_ROUNDS" value="4"/>
-        <env name="CACHE_DRIVER" value="redis"/>
-        <env name="DB_CONNECTION" value="pgsql"/>
-        <env name="DB_HOST" value="postgres"/>
-        <env name="DB_PORT" value="5432"/>
-        <env name="DB_DATABASE" value="matching_db"/>
-        <env name="DB_USERNAME" value="matching_user"/>
-        <env name="DB_PASSWORD" value="matching_password"/>
-        <env name="REDIS_HOST" value="redis"/>
-        <env name="RABBITMQ_HOST" value="rabbitmq"/>
-        <env name="RABBITMQ_PORT" value="5672"/>
-        <env name="RABBITMQ_USER" value="guest"/>
-        <env name="RABBITMQ_PASSWORD" value="guest"/>
+        <env name="CACHE_DRIVER" value="array"/>
+        <env name="DB_CONNECTION" value="sqlite"/>
+        <env name="DB_DATABASE" value=":memory:"/>
         <env name="MAIL_MAILER" value="array"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="SESSION_DRIVER" value="array"/>

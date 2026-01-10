@@ -6,10 +6,46 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
+use Tymon\JWTAuth\Contracts\JWTSubject;
 
-class User extends Authenticatable
+class User extends Authenticatable implements JWTSubject
 {
     use HasApiTokens, HasFactory, Notifiable;
+
+    /**
+     * Get the connected accounts for the user
+     */
+    public function connectedAccounts()
+    {
+        return $this->hasMany(ConnectedAccount::class);
+    }
+
+    /**
+     * Get active connected accounts
+     */
+    public function activeConnectedAccounts()
+    {
+        return $this->hasMany(ConnectedAccount::class)->where('status', 'active');
+    }
+
+    /**
+     * Get primary connected account
+     */
+    public function primaryConnectedAccount()
+    {
+        return $this->hasOne(ConnectedAccount::class)->where('is_primary', true)->where('status', 'active');
+    }
+
+    /**
+     * Check if user has connected a specific provider
+     */
+    public function hasConnectedProvider(string $provider)
+    {
+        return $this->connectedAccounts()
+            ->where('provider', $provider)
+            ->where('status', 'active')
+            ->exists();
+    }
 
     /**
      * The attributes that are mass assignable.
@@ -20,7 +56,6 @@ class User extends Authenticatable
         'name',
         'email',
         'password',
-        'role',
         'auth_system',
         'external_user_id',
         'external_credentials',
@@ -81,5 +116,28 @@ class User extends Authenticatable
     public function isViewer(): bool
     {
         return $this->role === 'viewer';
+    }
+
+    /**
+     * Get the identifier that will be stored in the subject claim of the JWT.
+     *
+     * @return mixed
+     */
+    public function getJWTIdentifier()
+    {
+        return $this->getKey();
+    }
+
+    /**
+     * Return a key value array, containing any custom claims to be added to the JWT.
+     *
+     * @return array
+     */
+    public function getJWTCustomClaims()
+    {
+        return [
+            'email' => $this->email,
+            'name' => $this->name,
+        ];
     }
 }

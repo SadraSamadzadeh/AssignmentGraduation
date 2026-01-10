@@ -2,10 +2,13 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
 class TeamMapping extends Model
 {
+    use HasFactory;
+
     protected $table = 'team_mappings';
 
     protected $fillable = [

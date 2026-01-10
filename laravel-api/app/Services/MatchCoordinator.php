@@ -11,32 +11,20 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
-/**
- * Centralized matching coordinator service
- * Handles all matching logic: immediate (on ingestion) and batch (scheduled)
- */
 class MatchCoordinator
 {
     protected MatchingService $matchingService;
     
-    // Matching thresholds
-    const THRESHOLD_IMMEDIATE = 70;  // Higher bar for immediate matching
-    const THRESHOLD_BATCH = 65;      // Slightly lower for batch retries
-    const THRESHOLD_HIGH_CONFIDENCE = 80; // For auto team mapping
-    
-    // Candidate filtering window (performance optimization)
-    const CANDIDATE_DATE_RANGE_DAYS = 3;  // ±3 days for candidate filtering
+    const THRESHOLD_IMMEDIATE = 70;
+    const THRESHOLD_BATCH = 65;
+    const THRESHOLD_HIGH_CONFIDENCE = 80;
+    const CANDIDATE_DATE_RANGE_DAYS = 3;
     
     public function __construct(MatchingService $matchingService)
     {
         $this->matchingService = $matchingService;
     }
 
-    /**
-     * Attempt immediate match for newly ingested tracking
-     * Used by: ProcessPrimeplayMessage
-     * Strategy: Match single tracking against all available videos
-     */
     public function matchTrackingToVideos(TrackingDashboard $tracking): ?GlobalMatches
     {
         Log::info('Attempting immediate tracking→video match', [
@@ -44,32 +32,26 @@ class MatchCoordinator
             'event_date' => $tracking->event_date?->format('Y-m-d')
         ]);
         
-        // Get candidate videos (±3 days for performance optimization)
         $candidates = $this->getCandidateVideos($tracking->event_date);
         
         if ($candidates->isEmpty()) {
             Log::info('No candidate videos found for immediate matching', [
-                'tracking_id' => $tracking->tracking_id,
-                'date_range' => '±' . self::CANDIDATE_DATE_RANGE_DAYS . ' days'
+                'tracking_id' => $tracking->tracking_id
             ]);
             return null;
         }
         
         $trackingFormatted = $this->formatTrackingData($tracking->tracking_data, $tracking);
-        
-        // Find best match among candidates
         $bestMatch = $this->findBestVideoMatch($trackingFormatted, $candidates);
         
         if (!$bestMatch || $bestMatch['score'] < self::THRESHOLD_IMMEDIATE) {
-            Log::info('No suitable video match found (below threshold)', [
+            Log::info('No suitable video match found', [
                 'tracking_id' => $tracking->tracking_id,
-                'best_score' => $bestMatch['score'] ?? 0,
-                'threshold' => self::THRESHOLD_IMMEDIATE
+                'best_score' => $bestMatch['score'] ?? 0
             ]);
             return null;
         }
         
-        // Create the match
         return $this->createMatch(
             $tracking,
             $bestMatch['video'],
@@ -79,11 +61,6 @@ class MatchCoordinator
         );
     }
 
-    /**
-     * Attempt immediate match for newly ingested video
-     * Used by: ProcessVideoMessage
-     * Strategy: Match single video against all available tracking
-     */
     public function matchVideoToTracking(VideoDashboard $video): ?GlobalMatches
     {
         Log::info('Attempting immediate video→tracking match', [
@@ -91,7 +68,6 @@ class MatchCoordinator
             'event_date' => $video->event_date?->format('Y-m-d')
         ]);
         
-        // Check team mapping first (fastest path)
         $teamMatch = $this->checkTeamMappingForVideo($video);
         if ($teamMatch) {
             return $this->createMatch(
@@ -103,32 +79,26 @@ class MatchCoordinator
             );
         }
         
-        // Get candidate tracking (±3 days for performance optimization)
         $candidates = $this->getCandidateTracking($video->event_date);
         
         if ($candidates->isEmpty()) {
-            Log::info('No candidate tracking found for immediate matching', [
-                'video_id' => $video->video_id,
-                'date_range' => '±' . self::CANDIDATE_DATE_RANGE_DAYS . ' days'
+            Log::info('No candidate tracking found', [
+                'video_id' => $video->video_id
             ]);
             return null;
         }
         
         $videoFormatted = $this->formatVideoData($video->video_data, $video);
-        
-        // Find best match among candidates
         $bestMatch = $this->findBestTrackingMatch($videoFormatted, $candidates);
         
         if (!$bestMatch || $bestMatch['score'] < self::THRESHOLD_IMMEDIATE) {
-            Log::info('No suitable tracking match found (below threshold)', [
+            Log::info('No suitable tracking match found', [
                 'video_id' => $video->video_id,
-                'best_score' => $bestMatch['score'] ?? 0,
-                'threshold' => self::THRESHOLD_IMMEDIATE
+                'best_score' => $bestMatch['score'] ?? 0
             ]);
             return null;
         }
         
-        // Create the match
         return $this->createMatch(
             $bestMatch['tracking'],
             $video,
@@ -138,14 +108,6 @@ class MatchCoordinator
         );
     }
 
-    /**
-     * Batch process all unmatched records
-     * Used by: MatchUnmatchedData (scheduled job)
-     * Strategy: Process unmatched videos against unmatched tracking within date range
-     * 
-     * Optimization: Only fetch recent unmatched records (last 30 days) to avoid
-     * processing very old data that's unlikely to match
-     */
     public function processBatchMatching(): array
     {
         Log::info('Starting batch matching process');
@@ -159,14 +121,13 @@ class MatchCoordinator
             'tracking_pool_size' => 0,
         ];
         
-        // Fetch unmatched records from last 30 days only (performance optimization)
         $cutoffDate = now()->subDays(30);
         
         $unmatchedVideos = VideoDashboard::where(function($q) {
                 $q->where('status', 'unmatched')->orWhereNull('status');
             })
             ->where('event_date', '>=', $cutoffDate)
-            ->orderBy('event_date', 'desc')  // Process newest first
+            ->orderBy('event_date', 'desc')
             ->get();
             
         $unmatchedTracking = TrackingDashboard::where(function($q) {
@@ -179,8 +140,7 @@ class MatchCoordinator
         Log::info('Found unmatched records for batch processing', [
             'video_count' => $unmatchedVideos->count(),
             'tracking_count' => $unmatchedTracking->count(),
-            'cutoff_date' => $cutoffDate->format('Y-m-d'),
-            'date_range_per_video' => '±' . self::CANDIDATE_DATE_RANGE_DAYS . ' days'
+            'cutoff_date' => $cutoffDate->format('Y-m-d')
         ]);
         
         $stats['tracking_pool_size'] = $unmatchedTracking->count();
@@ -190,14 +150,11 @@ class MatchCoordinator
             return $stats;
         }
         
-        // Group tracking by date for efficient lookup (±3 days per video)
         $trackingByDate = $this->groupTrackingByDate($unmatchedTracking);
         
-        // Process each video
         foreach ($unmatchedVideos as $video) {
             $stats['videos_processed']++;
             
-            // Check team mapping first (confirmed matches)
             $teamMatch = $this->checkTeamMappingForVideo($video, $unmatchedTracking);
             
             if ($teamMatch) {
@@ -210,7 +167,7 @@ class MatchCoordinator
                 );
                 $stats['matches_created']++;
                 
-                Log::info('Match created from confirmed team mapping', [
+                Log::info('Match created from team mapping', [
                     'video_id' => $video->video_id,
                     'tracking_id' => $teamMatch['tracking']->tracking_id,
                     'score' => $teamMatch['result']['score']
@@ -218,11 +175,9 @@ class MatchCoordinator
                 continue;
             }
             
-            // Similarity matching
             $videoFormatted = $this->formatVideoData($video->video_data, $video);
             $videoDate = $video->event_date ? $video->event_date->format('Y-m-d') : null;
             
-            // Get date-filtered candidates
             $candidates = $this->getCandidateTrackingFromGrouped($trackingByDate, $videoDate);
             
             if (empty($candidates)) {
@@ -230,7 +185,6 @@ class MatchCoordinator
                 continue;
             }
             
-            // Find best match
             $bestMatch = $this->findBestTrackingMatchFromArray($videoFormatted, $candidates);
             
             if (!$bestMatch) {
@@ -253,7 +207,6 @@ class MatchCoordinator
                 );
                 $stats['matches_created']++;
                 
-                // Auto-create team mapping if high confidence
                 if ($bestMatch['score'] >= self::THRESHOLD_HIGH_CONFIDENCE) {
                     if ($this->updateTeamMapping($video, $bestMatch['tracking'], $bestMatch['result'])) {
                         $stats['team_mappings_created']++;
@@ -275,9 +228,6 @@ class MatchCoordinator
         return $stats;
     }
 
-    /**
-     * Find best video match for a tracking record
-     */
     protected function findBestVideoMatch(array $trackingFormatted, $videoCandidates): ?array
     {
         $bestMatch = null;
@@ -305,9 +255,6 @@ class MatchCoordinator
         return $bestMatch;
     }
 
-    /**
-     * Find best tracking match for a video record (Collection)
-     */
     protected function findBestTrackingMatch(array $videoFormatted, $trackingCandidates): ?array
     {
         $bestMatch = null;
@@ -335,9 +282,6 @@ class MatchCoordinator
         return $bestMatch;
     }
 
-    /**
-     * Find best tracking match from plain array (used in batch)
-     */
     protected function findBestTrackingMatchFromArray(array $videoFormatted, array $trackingArray): ?array
     {
         $bestMatch = null;
@@ -371,19 +315,9 @@ class MatchCoordinator
         return $bestMatch;
     }
 
-    /**
-     * Get candidate videos for a tracking date (±3 days)
-     * Optimization: Only query videos within date range instead of all videos
-     * 
-     * Performance Impact:
-     * - Before: Query ALL videos (could be 100k+ records)
-     * - After: Query only ±3 days (typically 100-1000 records)
-     * - Speedup: 10x-100x faster at scale
-     */
     protected function getCandidateVideos(?\DateTime $date)
     {
         if (!$date) {
-            // Fallback: if no date, query recent videos only (last 7 days)
             $start = now()->subDays(7);
             $end = now()->addDay();
             return VideoDashboard::whereBetween('event_date', [$start, $end])->get();
@@ -398,19 +332,10 @@ class MatchCoordinator
         ]);
         
         return VideoDashboard::whereBetween('event_date', [$start, $end])
-            ->orderBy('event_date')  // Use index for faster scan
+            ->orderBy('event_date')
             ->get();
     }
 
-    /**
-     * Get candidate tracking for a video date (±3 days)
-     * Optimization: Only query unmatched tracking within date range
-     * 
-     * Performance Impact:
-     * - Before: Query ALL unmatched tracking (could be 100k+ records)
-     * - After: Query only ±3 days (typically 100-1000 records)
-     * - Speedup: 10x-100x faster at scale
-     */
     protected function getCandidateTracking(?\DateTime $date)
     {
         $query = TrackingDashboard::where(function($q) {
@@ -427,9 +352,8 @@ class MatchCoordinator
             ]);
             
             $query->whereBetween('event_date', [$start, $end])
-                  ->orderBy('event_date');  // Use index for faster scan
+                  ->orderBy('event_date');
         } else {
-            // Fallback: if no date, query recent tracking only (last 7 days)
             $start = now()->subDays(7);
             $end = now()->addDay();
             $query->whereBetween('event_date', [$start, $end]);
@@ -438,9 +362,6 @@ class MatchCoordinator
         return $query->get();
     }
 
-    /**
-     * Group tracking records by date for batch processing
-     */
     protected function groupTrackingByDate($trackingCollection): array
     {
         $grouped = [];
@@ -500,10 +421,6 @@ class MatchCoordinator
         return $candidates;
     }
 
-    /**
-     * Check if video has confirmed team mapping
-     * Optionally pass tracking collection to search within (for batch)
-     */
     protected function checkTeamMappingForVideo(VideoDashboard $video, $trackingCollection = null): ?array
     {
         $videoTeamId = $this->extractVideoTeamId($video->video_data);
@@ -520,7 +437,6 @@ class MatchCoordinator
             return null;
         }
         
-        // Search in provided collection or query database
         if ($trackingCollection) {
             $tracking = $trackingCollection->first(function($t) use ($mapping) {
                 $primeplayTeamId = $this->extractPrimeplayTeamId($t->tracking_data);
@@ -550,9 +466,6 @@ class MatchCoordinator
         ];
     }
 
-    /**
-     * Update or create team mapping after high-confidence match
-     */
     protected function updateTeamMapping(VideoDashboard $video, TrackingDashboard $tracking, array $result): bool
     {
         $videoTeamId = $this->extractVideoTeamId($video->video_data);
@@ -584,9 +497,6 @@ class MatchCoordinator
         return true;
     }
 
-    /**
-     * Create a global match with full audit trail
-     */
     protected function createMatch(
         TrackingDashboard $tracking,
         VideoDashboard $video,
@@ -653,9 +563,6 @@ class MatchCoordinator
         });
     }
 
-    /**
-     * Format tracking data for MatchingService
-     */
     protected function formatTrackingData(array $trackingData, TrackingDashboard $tracking): array
     {
         return [
@@ -666,9 +573,6 @@ class MatchCoordinator
         ];
     }
 
-    /**
-     * Format video data for MatchingService
-     */
     protected function formatVideoData(array $videoData, VideoDashboard $video): array
     {
         return [

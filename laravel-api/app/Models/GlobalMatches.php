@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Builder;
 
 class GlobalMatches extends Model
 {
@@ -73,6 +74,14 @@ class GlobalMatches extends Model
     }
 
     /**
+     * Get the tracking dashboard that owns the match.
+     */
+    public function tracking()
+    {
+        return $this->belongsTo(TrackingDashboard::class, 'tracking_id', 'tracking_id');
+    }
+
+    /**
      * Scope to get confirmed matches.
      */
     public function scopeConfirmed($query)
@@ -94,5 +103,13 @@ class GlobalMatches extends Model
     public function scopeRejected($query)
     {
         return $query->where('status', 'rejected');
+    }
+
+    /**
+     * Scope to get pending review matches.
+     */
+    public function scopePendingReview(Builder $query): Builder
+    {
+        return $query->where('status', 'pending_review');
     }
 }

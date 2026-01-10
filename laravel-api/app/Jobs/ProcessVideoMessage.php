@@ -34,7 +34,7 @@ class ProcessVideoMessage implements ShouldQueue
 
     public function handle(): void
     {
-        Log::channel('stack')->info('Processing video message', [
+        Log::info('Processing video message', [
             'routing_key' => $this->routingKey,
             'event_type' => $this->messageData['eventType'] ?? $this->messageData['event_type'] ?? 'unknown',
             'received_at' => now()->toDateTimeString()
@@ -52,7 +52,9 @@ class ProcessVideoMessage implements ShouldQueue
 
     protected function handleLiveDataRecordingStopped(): void
     {
-        $videoId = $this->messageData['match_data']['id'] 
+        // Support multiple ID formats including flat structure from tests
+        $videoId = $this->messageData['video_id']
+            ?? $this->messageData['match_data']['id'] 
             ?? $this->messageData['match']['id'] 
             ?? $this->messageData['videoId']
             ?? $this->messageData['id']
@@ -94,6 +96,31 @@ class ProcessVideoMessage implements ShouldQueue
         }
     }
 
+    /**
+     * Store a generic unmatched video message when required identifiers are missing.
+     */
+    protected function storeGenericMessage(): void
+    {
+        try {
+            $payloadId = $this->messageData['id'] ?? ('msg_' . uniqid());
+            VideoDashboard::updateOrCreate(
+                ['video_id' => $payloadId],
+                [
+                    'video_data' => $this->messageData,
+                    'source_system' => 'video',
+                    'status' => 'unmatched',
+                    'received_at' => now(),
+                    'event_date' => now()->format('Y-m-d'),
+                ]
+            );
+        } catch (\Exception $e) {
+            Log::error('Failed to store generic video message', [
+                'error' => $e->getMessage(),
+                'message' => $this->messageData
+            ]);
+        }
+    }
+
 
     /**
      * Store video data temporarily (waiting for match)
@@ -104,11 +131,11 @@ class ProcessVideoMessage implements ShouldQueue
     {
         $finalVideoId = $videoId ?? "video_{$datasetId}";
         
-        // Extract fields from message data
-        $homeClub = $this->messageData['home']['name'] ?? null;
-        $awayClub = $this->messageData['away']['name'] ?? null;
-        $startTime = $this->messageData['starting_at'] ?? null;
-        $endTime = $this->messageData['stopping_at'] ?? null;
+        // Extract fields from message data - support both nested and flat formats
+        $homeClub = $this->messageData['home_club_name'] ?? $this->messageData['home']['name'] ?? null;
+        $awayClub = $this->messageData['away_club_name'] ?? $this->messageData['away']['name'] ?? null;
+        $startTime = $this->messageData['start_time'] ?? $this->messageData['starting_at'] ?? null;
+        $endTime = $this->messageData['end_time'] ?? $this->messageData['stopping_at'] ?? null;
         
         // Calculate duration
         $durationMinutes = null;
@@ -123,22 +150,25 @@ class ProcessVideoMessage implements ShouldQueue
         }
         
         // Extract event date
-        $eventDate = null;
-        if ($startTime) {
+        $eventDate = $this->messageData['event_date'] ?? null;
+        if (!$eventDate && $startTime) {
             try {
                 $eventDate = (new \DateTime($startTime))->format('Y-m-d');
             } catch (\Exception $e) {
                 $eventDate = now()->format('Y-m-d');
             }
         }
+        if (!$eventDate) {
+            $eventDate = now()->format('Y-m-d');
+        }
         
         // Store in database (prevent duplicates with updateOrCreate)
         $videoDashboard = VideoDashboard::updateOrCreate(
             ['video_id' => $finalVideoId],
             [
-                'video_data' => $this->messageData,
+                'video_data' => $this->messageData['video_data'] ?? $this->messageData,
                 'source_system' => 'video',
-                'event_date' => $eventDate ?? now()->format('Y-m-d'),
+                'event_date' => $eventDate,
                 'start_time' => $startTime,
                 'end_time' => $endTime,
                 'duration_minutes' => $durationMinutes,

@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Builder;
 
 class TrackingDashboard extends Model
 {
@@ -74,5 +75,29 @@ class TrackingDashboard extends Model
     {
         $this->increment('match_attempts');
         $this->update(['last_match_attempt_at' => now()]);
+    }
+
+    /**
+     * Scope a query to only include unmatched records.
+     */
+    public function scopeUnmatched(Builder $query): Builder
+    {
+        return $query->where('status', 'unmatched');
+    }
+
+    /**
+     * Scope a query to only include matched records.
+     */
+    public function scopeMatched(Builder $query): Builder
+    {
+        return $query->where('status', 'matched');
+    }
+
+    /**
+     * Scope a query to filter by event date.
+     */
+    public function scopeByEventDate(Builder $query, $date): Builder
+    {
+        return $query->whereDate('event_date', $date);
     }
 }

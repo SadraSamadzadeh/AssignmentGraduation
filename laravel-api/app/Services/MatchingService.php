@@ -2,45 +2,52 @@
 
 namespace App\Services;
 
+use App\Models\TeamMapping;
 use DateTime;
 use DateTimeZone;
 
 class MatchingService
 {
-    /**
-     * Compare tracking and video data using TIME-FOCUSED matching approach
-     * 
-     * CRITICAL DATA STRUCTURE UNDERSTANDING:
-     * 
-     * Primeplay Tracking Data:
-     * - teamName: Generic identifier like "Test Team", "Team 1" (NOT actual club names)
-     * - name: Dataset name like "Match Test Team"
-     * - NO home/away club information available
-     * 
-     * Video Data:
-     * - home.name / away.name: Actual club names (e.g., "VV Capelle", "FC 's-Gravenzande")
-     * - home.team.name / away.team.name: Generic identifiers (e.g., "1", "2")
-     * - club.name: Primary club hosting the recording
-     * 
-     * MATCHING STRATEGY (Time-Focused):
-     * Since tracking data lacks club names, we CANNOT reliably match on team names.
-     * Instead, we rely heavily on temporal factors:
-     * 
-     * - Time Proximity: 70% weight - PRIMARY matching factor
-     * - Duration Similarity: 20% weight - Confirms match quality
-     * - Temporal Overlap: 10% weight - Final validation
-     * 
-     * Minimum score threshold: 65 points
-     * Auto-confirm threshold: 85 points
-     */
     public function compareTrackingAndVideo(array $trackingData, array $videoData): array
     {
         $score = 0;
         $reasons = [];
         $breakdown = [];
+        $earlyExit = false;
 
-        // STAGE 1: Time Proximity (70% weight - PRIMARY INDICATOR)
-        // This is the MOST RELIABLE matching factor since tracking lacks club names
+        // Check team mapping first - if high-confidence mapping exists, use it directly
+        $teamMappingResult = $this->checkTeamMapping($trackingData, $videoData);
+        
+        // If we found a high-confidence team mapping, bypass the normal algorithm
+        if ($teamMappingResult['mapping_found'] && $teamMappingResult['confidence_score'] >= 80) {
+            // Calculate score based on the team mapping confidence
+            $mappingScore = 70 + (($teamMappingResult['confidence_score'] - 80) / 20 * 30); // Scale 80-100 to 70-100
+            
+            return [
+                'score' => round($mappingScore, 2),
+                'confidence' => $this->getConfidenceLevel($mappingScore),
+                'reasons' => [
+                    "Matched via high-confidence team mapping",
+                    "Team mapping confidence: {$teamMappingResult['confidence_score']}/100",
+                    "Previously matched {$teamMappingResult['times_matched']} times"
+                ],
+                'breakdown' => [
+                    'team_mapping' => [
+                        'used' => true,
+                        'confidence_score' => $teamMappingResult['confidence_score'],
+                        'times_matched' => $teamMappingResult['times_matched'],
+                        'primeplay_team' => $teamMappingResult['primeplay_team'],
+                        'video_team' => $teamMappingResult['video_team']
+                    ]
+                ],
+                'tracking_id' => $trackingData['id'],
+                'video_id' => $videoData['id'],
+                'early_exit' => false,
+                'matched_via_team_mapping' => true
+            ];
+        }
+
+        // No high-confidence team mapping found - proceed with normal algorithm
         $timeScore = $this->calculateTimeProximity($trackingData, $videoData);
         $timeWeight = 70;
         $score += $timeScore * ($timeWeight / 100);
@@ -51,20 +58,19 @@ class MatchingService
             'weighted_score' => round($timeScore * ($timeWeight / 100), 2)
         ];
 
-        // Early exit if time difference is too large (optimization)
         if ($timeScore < 40) {
+            $earlyExit = true;
             return [
-                'score' => round($score, 2),
+                'score' => 0,
                 'confidence' => 'unlikely',
                 'reasons' => ['Time difference too large - likely different matches'],
                 'breakdown' => $breakdown,
                 'tracking_id' => $trackingData['id'],
                 'video_id' => $videoData['id'],
-                'early_exit' => true
+                'early_exit' => $earlyExit
             ];
         }
 
-        // STAGE 2: Duration Similarity (20% weight - CONFIRMATION)
         $durationScore = $this->calculateDurationSimilarity($trackingData, $videoData);
         $durationWeight = 20;
         $score += $durationScore * ($durationWeight / 100);
@@ -75,7 +81,6 @@ class MatchingService
             'weighted_score' => round($durationScore * ($durationWeight / 100), 2)
         ];
 
-        // STAGE 3: Temporal Overlap (10% weight - FINAL VERIFICATION)
         $overlapScore = $this->calculateTemporalOverlap($trackingData, $videoData);
         $overlapWeight = 10;
         $score += $overlapScore * ($overlapWeight / 100);
@@ -86,18 +91,25 @@ class MatchingService
             'weighted_score' => round($overlapScore * ($overlapWeight / 100), 2)
         ];
 
+        // Add team mapping info to breakdown even if not used for matching
+        $breakdown['team_mapping'] = [
+            'used' => false,
+            'reason' => $teamMappingResult['reason']
+        ];
+
         return [
             'score' => round($score, 2),
             'confidence' => $this->getConfidenceLevel($score),
             'reasons' => $reasons,
             'breakdown' => $breakdown,
             'tracking_id' => $trackingData['id'],
-            'video_id' => $videoData['id']
+            'video_id' => $videoData['id'],
+            'early_exit' => $earlyExit,
+            'matched_via_team_mapping' => false
         ];
     }
 
     /**
-     * Calculate time proximity with enhanced granularity
      * More forgiving for same-day matches, stricter for different days
      */
     private function calculateTimeProximity(array $trackingData, array $videoData): float
@@ -131,11 +143,7 @@ class MatchingService
         }
     }
 
-    /**
-     * Calculate duration similarity
-     * Compares the length of tracking session vs video recording
-     */
-    private function calculateDurationSimilarity(array $trackingData, array $videoData): float
+    protected function calculateDurationSimilarity(array $trackingData, array $videoData): int
     {
         try {
             // Calculate tracking duration
@@ -172,11 +180,7 @@ class MatchingService
         }
     }
 
-    /**
-     * Calculate temporal overlap between tracking and video sessions
-     * Measures how much the two time ranges actually overlap
-     */
-    private function calculateTemporalOverlap(array $trackingData, array $videoData): float
+    protected function calculateTemporalOverlap(array $trackingData, array $videoData): int
     {
         try {
             $trackingStart = $this->normalizeToUTC($trackingData['startTime']);
@@ -219,9 +223,85 @@ class MatchingService
     }
 
     /**
-     * Determine confidence level based on final score
+     * Check if there's a high-confidence team mapping between tracking and video teams.
+     * This allows the algorithm to leverage previously learned team associations.
      */
-    private function getConfidenceLevel(float $score): string
+    private function checkTeamMapping(array $trackingData, array $videoData): array
+    {
+        try {
+            // Extract team information from tracking data
+            $trackingTeamName = $trackingData['team_name'] ?? null;
+            
+            // Extract team information from video data (can be home or away team)
+            $videoHomeTeam = $videoData['home_club_name'] ?? null;
+            $videoAwayTeam = $videoData['away_club_name'] ?? null;
+            
+            // If we don't have team information, return neutral score
+            if (!$trackingTeamName || (!$videoHomeTeam && !$videoAwayTeam)) {
+                return [
+                    'reason' => 'No team data available',
+                    'mapping_found' => false
+                ];
+            }
+            
+            // Check for high-confidence mappings (>= 80 confidence, active status)
+            // Check both home and away teams
+            $mappings = TeamMapping::where('status', 'active')
+                ->where('confidence_score', '>=', 80)
+                ->where('primeplay_team_name', $trackingTeamName)
+                ->whereIn('video_team_name', array_filter([$videoHomeTeam, $videoAwayTeam]))
+                ->orderBy('confidence_score', 'desc')
+                ->first();
+            
+            if ($mappings) {
+                // Found a high-confidence mapping!
+                return [
+                    'reason' => "High-confidence team mapping found",
+                    'mapping_found' => true,
+                    'confidence_score' => $mappings->confidence_score,
+                    'times_matched' => $mappings->times_matched,
+                    'primeplay_team' => $trackingTeamName,
+                    'video_team' => $mappings->video_team_name
+                ];
+            }
+            
+            // Check for medium-confidence mappings (60-79 confidence)
+            $mediumMapping = TeamMapping::where('status', 'active')
+                ->where('confidence_score', '>=', 60)
+                ->where('confidence_score', '<', 80)
+                ->where('primeplay_team_name', $trackingTeamName)
+                ->whereIn('video_team_name', array_filter([$videoHomeTeam, $videoAwayTeam]))
+                ->orderBy('confidence_score', 'desc')
+                ->first();
+            
+            if ($mediumMapping) {
+                // Found a medium-confidence mapping - but not high enough for auto-match
+                return [
+                    'reason' => "Medium-confidence team mapping found (not used for auto-match)",
+                    'mapping_found' => true,
+                    'confidence_score' => $mediumMapping->confidence_score,
+                    'times_matched' => $mediumMapping->times_matched,
+                    'primeplay_team' => $trackingTeamName,
+                    'video_team' => $mediumMapping->video_team_name
+                ];
+            }
+            
+            // No existing mapping found - neutral score
+            return [
+                'reason' => 'No existing team mapping found',
+                'mapping_found' => false
+            ];
+            
+        } catch (\Exception $e) {
+            // On error, return neutral
+            return [
+                'reason' => 'Error checking team mappings',
+                'mapping_found' => false
+            ];
+        }
+    }
+
+    protected function getConfidenceLevel(float $score): string
     {
         if ($score >= 85) return 'high';
         if ($score >= 70) return 'medium';
@@ -240,7 +320,8 @@ class MatchingService
             $dt->setTimezone(new DateTimeZone('UTC'));
             return $dt;
         } catch (\Exception $e) {
-            return new DateTime($timestamp);
+            // Fallback safely to current time in UTC when parsing fails
+            return new DateTime('now', new DateTimeZone('UTC'));
         }
     }
 

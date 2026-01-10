@@ -1,136 +1,61 @@
-# ============================================================================
-# Docker Compose - LOCAL DEVELOPMENT ONLY
-# ============================================================================
-# For DEVELOPMENT: Use this file (docker-compose up -d)
-# For PRODUCTION: Use Kubernetes manifests in k8s/ folder
-# ============================================================================
-
 version: "3.8"
 
 services:
-    # ---------------------------------------------------------------------------
-    # PostgreSQL Database
-    # ---------------------------------------------------------------------------
     postgres:
         image: postgres:15-alpine
-        container_name: assignment_postgres
+        container_name: zipper_postgres
         environment:
-            POSTGRES_DB: assignment_graduation
-            POSTGRES_USER: assignment_user
-            POSTGRES_PASSWORD: postgres_password_123
+            POSTGRES_DB: zipper_db
+            POSTGRES_USER: zipper_user
+            POSTGRES_PASSWORD: zipper_pass_2026
         ports:
             - "5432:5432"
         volumes:
             - postgres_data:/var/lib/postgresql/data
-            - ./database/init:/docker-entrypoint-initdb.d
         healthcheck:
-            test:
-                [
-                    "CMD-SHELL",
-                    "pg_isready -U assignment_user -d assignment_graduation",
-                ]
-            interval: 10s
+            test: ["CMD-SHELL", "pg_isready -U zipper_user -d zipper_db"]
+            interval: 5s
             timeout: 5s
-            retries: 5
+            retries: 10
 
-    # ---------------------------------------------------------------------------
-    # Redis Cache
-    # ---------------------------------------------------------------------------
-    redis:
-        image: redis:7-alpine
-        container_name: assignment_redis
-        ports:
-            - "6379:6379"
-        command: redis-server --requirepass redis_password_123
-        healthcheck:
-            test: ["CMD", "redis-cli", "--pass", "redis_password_123", "ping"]
-            interval: 10s
-            timeout: 5s
-            retries: 5
-
-    # ---------------------------------------------------------------------------
-    # RabbitMQ Message Queue
-    # ---------------------------------------------------------------------------
     rabbitmq:
         image: rabbitmq:3-management-alpine
-        container_name: assignment_rabbitmq
+        container_name: zipper_rabbitmq
         environment:
-            RABBITMQ_DEFAULT_USER: guest
-            RABBITMQ_DEFAULT_PASS: rabbitmq_password_123
+            RABBITMQ_DEFAULT_USER: zipper_admin
+            RABBITMQ_DEFAULT_PASS: zipper_rabbitmq_2026
         ports:
-            - "5672:5672" # AMQP
-            - "15672:15672" # Management UI
+            - "5672:5672"
+            - "15672:15672"
         healthcheck:
-            test: ["CMD", "rabbitmq-diagnostics", "ping"]
-            interval: 30s
-            timeout: 10s
-            retries: 5
+            test: rabbitmq-diagnostics -q check_port_connectivity
+            interval: 5s
+            timeout: 5s
+            retries: 20
+            start_period: 10s
 
-    # ---------------------------------------------------------------------------
-    # Laravel API
-    # ---------------------------------------------------------------------------
-    api:
+    app:
         build:
             context: .
             dockerfile: Dockerfile
-            target: production
-        container_name: assignment_api
-        depends_on:
-            postgres:
-                condition: service_healthy
-            redis:
-                condition: service_healthy
-            rabbitmq:
-                condition: service_healthy
-        env_file:
-            - .env.local
+        container_name: zipper_app
         ports:
             - "80:80"
         volumes:
             - ./storage:/var/www/html/storage
-            - ./public:/var/www/html/public
-        healthcheck:
-            test: ["CMD", "curl", "-f", "http://localhost/api/health"]
-            interval: 30s
-            timeout: 3s
-            retries: 3
-            start_period: 40s
-
-    # ---------------------------------------------------------------------------
-    # Laravel Queue Worker
-    # ---------------------------------------------------------------------------
-    worker:
-        build:
-            context: .
-            dockerfile: Dockerfile
-            target: worker
-        container_name: assignment_worker
+            - ./.env:/var/www/html/.env
         depends_on:
-            - postgres
-            - redis
-            - rabbitmq
-        env_file:
-            - .env.local
-        volumes:
-            - ./storage:/var/www/html/storage
-
-    # ---------------------------------------------------------------------------
-    # Laravel Scheduler
-    # ---------------------------------------------------------------------------
-    scheduler:
-        build:
-            context: .
-            dockerfile: Dockerfile
-            target: scheduler
-        container_name: assignment_scheduler
-        depends_on:
-            - postgres
-            - redis
-        env_file:
-            - .env.local
-        volumes:
-            - ./storage:/var/www/html/storage
+            postgres:
+                condition: service_healthy
+            rabbitmq:
+                condition: service_healthy
+        command: >
+            sh -c "
+              sleep 15 &&
+              php artisan migrate --force &&
+              (php artisan rabbitmq:init || echo 'RabbitMQ init skipped') &&
+              /usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf
+            "
 
 volumes:
     postgres_data:
-        driver: local

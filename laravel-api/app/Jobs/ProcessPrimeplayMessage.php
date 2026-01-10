@@ -30,7 +30,7 @@ class ProcessPrimeplayMessage implements ShouldQueue
 
     public function handle(): void
     {
-        Log::channel('stack')->info('Processing Primeplay tracking message', [
+        Log::info('Processing Primeplay tracking message', [
             'routing_key' => $this->routingKey,
             'event_type' => $this->messageData['eventType'] ?? $this->messageData['event_type'] ?? 'unknown',
             'received_at' => now()->toDateTimeString()
@@ -38,8 +38,8 @@ class ProcessPrimeplayMessage implements ShouldQueue
 
         $eventType = $this->messageData['eventType'] ?? $this->messageData['event_type'] ?? null;
         
-        // Only handle tracking-related events
-        if ($eventType === 'MatchImportCompleted' || $eventType === 'match.import.completed') {
+        // Only handle tracking-related events OR handle any message with tracking_id
+        if ($eventType === 'MatchImportCompleted' || $eventType === 'match.import.completed' || isset($this->messageData['tracking_id'])) {
             $this->handleMatchImportCompleted();
         }
     }
@@ -50,14 +50,15 @@ class ProcessPrimeplayMessage implements ShouldQueue
      */
     protected function handleMatchImportCompleted(): void
     {
-        // Extract tracking ID (use datasetId from matchData)
-        $datasetId = $this->messageData['datasetId'] 
+        // Extract tracking ID - support multiple formats
+        $datasetId = $this->messageData['tracking_id']
+            ?? $this->messageData['datasetId'] 
             ?? $this->messageData['matchData']['datasetId']
             ?? $this->messageData['match']['id'] 
             ?? null;
         
         if (!$datasetId) {
-            Log::warning('Primeplay message missing datasetId', ['message' => $this->messageData]);
+            Log::warning('Primeplay message missing datasetId/tracking_id', ['message' => $this->messageData]);
             return;
         }
         
@@ -103,10 +104,10 @@ class ProcessPrimeplayMessage implements ShouldQueue
      */
     protected function storeTemporaryTracking($datasetId): TrackingDashboard
     {
-        // Extract fields from message data
-        $matchData = $this->messageData['matchData'] ?? [];
-        $startTime = $matchData['startTime'] ?? $matchData['start'] ?? null;
-        $endTime = $matchData['endTime'] ?? $matchData['end'] ?? null;
+        // Extract fields from message data - support flat and nested formats
+        $matchData = $this->messageData['matchData'] ?? $this->messageData['tracking_data']['matchData'] ?? [];
+        $startTime = $this->messageData['start_time'] ?? $matchData['startTime'] ?? $matchData['start'] ?? null;
+        $endTime = $this->messageData['end_time'] ?? $matchData['endTime'] ?? $matchData['end'] ?? null;
         
         // Calculate duration in minutes
         $durationMinutes = null;
@@ -121,13 +122,16 @@ class ProcessPrimeplayMessage implements ShouldQueue
         }
         
         // Extract event date
-        $eventDate = null;
-        if ($startTime) {
+        $eventDate = $this->messageData['event_date'] ?? null;
+        if (!$eventDate && $startTime) {
             try {
                 $eventDate = (new \DateTime($startTime))->format('Y-m-d');
             } catch (\Exception $e) {
                 $eventDate = now()->format('Y-m-d');
             }
+        }
+        if (!$eventDate) {
+            $eventDate = now()->format('Y-m-d');
         }
         
         // Store in database (prevent duplicates with updateOrCreate)
@@ -136,12 +140,12 @@ class ProcessPrimeplayMessage implements ShouldQueue
             [
                 'tracking_data' => $this->messageData,
                 'source_system' => 'primeplay',
-                'event_date' => $eventDate ?? now()->format('Y-m-d'),
+                'event_date' => $eventDate,
                 'start_time' => $startTime,
                 'end_time' => $endTime,
                 'duration_minutes' => $durationMinutes,
                 'dataset_name' => $matchData['name'] ?? null,
-                'team_name' => $matchData['teamName'] ?? null,
+                'team_name' => $this->messageData['team_name'] ?? $matchData['teamName'] ?? null,
                 'status' => 'unmatched',
                 'received_at' => now(),
                 'expires_at' => now()->addDays(7),

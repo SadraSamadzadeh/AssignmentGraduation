@@ -3,325 +3,219 @@
 namespace App\Http\Controllers;
 
 use App\Models\User;
-use App\Services\ExternalAuthService;
 use Illuminate\Http\Request;
-use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\Log;
+use Tymon\JWTAuth\Facades\JWTAuth;
+use Tymon\JWTAuth\Exceptions\JWTException;
 
 class AuthController extends Controller
 {
-    protected $externalAuthService;
-
-    public function __construct(ExternalAuthService $externalAuthService)
-    {
-        $this->externalAuthService = $externalAuthService;
-    }
-
     /**
-     * Unified login endpoint - handles local, Primeplay, and Video Dashboard authentication
-     * 
+     * Register a new user
+     *
      * @param Request $request
-     * @return JsonResponse
+     * @return \Illuminate\Http\JsonResponse
      */
-    public function login(Request $request): JsonResponse
+    public function register(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'email' => 'required|string',
-            'password' => 'required|string',
-            'auth_system' => 'required|in:local,primeplay,video_dashboard'
+            'name' => 'required|string|max:255',
+            'email' => 'required|string|email|max:255|unique:users',
+            'password' => 'required|string|min:8|confirmed',
         ]);
 
         if ($validator->fails()) {
             return response()->json([
                 'success' => false,
-                'message' => 'Validation failed',
                 'errors' => $validator->errors()
             ], 422);
         }
 
-        $authSystem = $request->auth_system;
-        $email = $request->email;
-        $password = $request->password;
-
         try {
-            switch ($authSystem) {
-                case 'local':
-                    return $this->loginLocal($email, $password);
-                
-                case 'primeplay':
-                    return $this->loginPrimeplay($email, $password);
-                
-                case 'video_dashboard':
-                    return $this->loginVideoDashboard($email, $password);
-                
-                default:
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'Invalid authentication system'
-                    ], 400);
-            }
-
-        } catch (\Exception $e) {
-            Log::error('Login error', [
-                'auth_system' => $authSystem,
-                'email' => $email,
-                'error' => $e->getMessage()
+            $user = User::create([
+                'name' => $request->name,
+                'email' => $request->email,
+                'password' => Hash::make($request->password),
             ]);
 
+            Log::info('User registered successfully', ['user_id' => $user->id, 'email' => $user->email]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'User registered successfully',
+                'user' => [
+                    'id' => $user->id,
+                    'name' => $user->name,
+                    'email' => $user->email,
+                ]
+            ], 201);
+
+        } catch (\Exception $e) {
+            Log::error('User registration failed', ['error' => $e->getMessage()]);
+            
             return response()->json([
                 'success' => false,
-                'message' => 'Login failed',
-                'error' => $e->getMessage()
+                'message' => 'Registration failed. Please try again.'
             ], 500);
         }
     }
 
     /**
-     * Local authentication
+     * Authenticate user and generate JWT token
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
      */
-    protected function loginLocal(string $email, string $password): JsonResponse
-    {
-        $user = User::where('email', $email)
-            ->where('auth_system', 'local')
-            ->first();
-
-        if (!$user || !Hash::check($password, $user->password)) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Invalid credentials'
-            ], 401);
-        }
-
-        $user->update(['last_login_at' => now()]);
-        $token = $user->createToken('auth_token')->plainTextToken;
-
-        Log::info('Local authentication successful', [
-            'user_id' => $user->id,
-            'email' => $email
-        ]);
-
-        return response()->json([
-            'success' => true,
-            'auth_system' => 'local',
-            'user' => $user,
-            'token' => $token,
-            'token_type' => 'Bearer'
-        ]);
-    }
-
-    /**
-     * Primeplay external authentication
-     */
-    protected function loginPrimeplay(string $username, string $password): JsonResponse
-    {
-        $authResult = $this->externalAuthService->authenticatePrimeplay($username, $password);
-
-        if (!$authResult || !$authResult['success']) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Primeplay authentication failed'
-            ], 401);
-        }
-
-        // Find or create local user record for this external user
-        $externalUserId = $authResult['user']['id'] ?? $authResult['user']['user_id'] ?? null;
-        $externalEmail = $authResult['user']['email'] ?? $username;
-        $externalName = $authResult['user']['name'] ?? $authResult['user']['username'] ?? $username;
-
-        $user = User::updateOrCreate(
-            [
-                'auth_system' => 'primeplay',
-                'external_user_id' => $externalUserId
-            ],
-            [
-                'name' => $externalName,
-                'email' => $externalEmail,
-                'external_credentials' => [
-                    'token' => $authResult['token'],
-                    'user_data' => $authResult['user']
-                ],
-                'external_token_expires_at' => $authResult['expires_at'],
-                'last_login_at' => now()
-            ]
-        );
-
-        $token = $user->createToken('auth_token')->plainTextToken;
-
-        Log::info('Primeplay authentication successful', [
-            'user_id' => $user->id,
-            'external_user_id' => $externalUserId
-        ]);
-
-        return response()->json([
-            'success' => true,
-            'auth_system' => 'primeplay',
-            'user' => $user,
-            'token' => $token,
-            'token_type' => 'Bearer',
-            'external_token' => $authResult['token']
-        ]);
-    }
-
-    /**
-     * Video Dashboard external authentication
-     */
-    protected function loginVideoDashboard(string $email, string $password): JsonResponse
-    {
-        $authResult = $this->externalAuthService->authenticateVideoDashboard($email, $password);
-
-        if (!$authResult || !$authResult['success']) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Video Dashboard authentication failed'
-            ], 401);
-        }
-
-        // Find or create local user record for this external user
-        $externalUserId = $authResult['user']['id'] ?? $authResult['user']['user_id'] ?? null;
-        $externalEmail = $authResult['user']['email'] ?? $email;
-        $externalName = $authResult['user']['name'] ?? $authResult['user']['username'] ?? $email;
-
-        $user = User::updateOrCreate(
-            [
-                'auth_system' => 'video_dashboard',
-                'external_user_id' => $externalUserId
-            ],
-            [
-                'name' => $externalName,
-                'email' => $externalEmail,
-                'external_credentials' => [
-                    'token' => $authResult['token'],
-                    'user_data' => $authResult['user']
-                ],
-                'external_token_expires_at' => $authResult['expires_at'],
-                'last_login_at' => now()
-            ]
-        );
-
-        $token = $user->createToken('auth_token')->plainTextToken;
-
-        Log::info('Video Dashboard authentication successful', [
-            'user_id' => $user->id,
-            'external_user_id' => $externalUserId
-        ]);
-
-        return response()->json([
-            'success' => true,
-            'auth_system' => 'video_dashboard',
-            'user' => $user,
-            'token' => $token,
-            'token_type' => 'Bearer',
-            'external_token' => $authResult['token']
-        ]);
-    }
-
-    /**
-     * Logout user
-     */
-    public function logout(Request $request): JsonResponse
-    {
-        $request->user()->currentAccessToken()->delete();
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Logged out successfully'
-        ]);
-    }
-
-    /**
-     * Get authenticated user information
-     */
-    public function me(Request $request): JsonResponse
-    {
-        $user = $request->user();
-
-        return response()->json([
-            'success' => true,
-            'user' => $user
-        ]);
-    }
-
-    /**
-     * Make API call to external dashboard (Primeplay or Video Dashboard)
-     */
-    public function externalApiCall(Request $request): JsonResponse
+    public function login(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'system' => 'required|in:primeplay,video_dashboard',
-            'endpoint' => 'required|string',
-            'method' => 'nullable|in:GET,POST,PUT,DELETE',
-            'data' => 'nullable|array'
+            'email' => 'required|email',
+            'password' => 'required|string|min:8',
         ]);
 
         if ($validator->fails()) {
             return response()->json([
                 'success' => false,
-                'message' => 'Validation failed',
                 'errors' => $validator->errors()
             ], 422);
         }
 
-        $user = $request->user();
-        
-        if ($user->auth_system !== $request->system) {
-            return response()->json([
-                'success' => false,
-                'message' => 'User not authenticated with this system'
-            ], 403);
-        }
-
-        $credentials = $user->external_credentials;
-        $token = $credentials['token'] ?? null;
-
-        if (!$token) {
-            return response()->json([
-                'success' => false,
-                'message' => 'No external token found'
-            ], 401);
-        }
+        $credentials = $request->only('email', 'password');
 
         try {
-            $result = $request->system === 'primeplay'
-                ? $this->externalAuthService->callPrimeplayApi(
-                    $token,
-                    $request->endpoint,
-                    $request->method ?? 'GET',
-                    $request->data ?? []
-                )
-                : $this->externalAuthService->callVideoDashboardApi(
-                    $token,
-                    $request->endpoint,
-                    $request->method ?? 'GET',
-                    $request->data ?? []
-                );
-
-            if ($result === null) {
+            if (!$token = JWTAuth::attempt($credentials)) {
+                Log::warning('Failed login attempt', ['email' => $request->email]);
+                
                 return response()->json([
                     'success' => false,
-                    'message' => 'External API call failed'
-                ], 500);
+                    'message' => 'Invalid credentials'
+                ], 401);
+            }
+
+            $user = auth()->user();
+            
+            Log::info('User logged in successfully', ['user_id' => $user->id, 'email' => $user->email]);
+
+            return $this->respondWithToken($token);
+
+        } catch (JWTException $e) {
+            Log::error('JWT token creation failed', ['error' => $e->getMessage()]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Could not create token'
+            ], 500);
+        }
+    }
+
+    /**
+     * Get the authenticated user
+     *
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function me()
+    {
+        try {
+            $user = auth()->user();
+            
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'User not authenticated'
+                ], 401);
             }
 
             return response()->json([
                 'success' => true,
-                'data' => $result
+                'user' => [
+                    'id' => $user->id,
+                    'name' => $user->name,
+                    'email' => $user->email,
+                    'created_at' => $user->created_at,
+                ]
             ]);
 
         } catch (\Exception $e) {
-            Log::error('External API call error', [
-                'system' => $request->system,
-                'endpoint' => $request->endpoint,
-                'error' => $e->getMessage()
-            ]);
-
+            Log::error('Failed to retrieve user', ['error' => $e->getMessage()]);
+            
             return response()->json([
                 'success' => false,
-                'message' => 'External API call failed',
-                'error' => $e->getMessage()
+                'message' => 'Failed to retrieve user information'
             ], 500);
         }
+    }
+
+    /**
+     * Logout user (invalidate token)
+     *
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function logout()
+    {
+        try {
+            auth()->logout();
+            
+            Log::info('User logged out successfully');
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Successfully logged out'
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Logout failed', ['error' => $e->getMessage()]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Logout failed'
+            ], 500);
+        }
+    }
+
+    /**
+     * Refresh JWT token
+     *
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function refresh()
+    {
+        try {
+            $newToken = auth()->refresh();
+            
+            Log::info('Token refreshed successfully');
+
+            return $this->respondWithToken($newToken);
+
+        } catch (JWTException $e) {
+            Log::error('Token refresh failed', ['error' => $e->getMessage()]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Could not refresh token'
+            ], 500);
+        }
+    }
+
+    /**
+     * Return token response structure
+     *
+     * @param string $token
+     * @return \Illuminate\Http\JsonResponse
+     */
+    protected function respondWithToken($token)
+    {
+        return response()->json([
+            'success' => true,
+            'access_token' => $token,
+            'token_type' => 'bearer',
+            'expires_in' => auth()->factory()->getTTL() * 60,
+            'user' => [
+                'id' => auth()->user()->id,
+                'name' => auth()->user()->name,
+                'email' => auth()->user()->email,
+            ]
+        ]);
     }
 }

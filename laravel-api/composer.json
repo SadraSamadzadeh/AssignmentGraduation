@@ -6,6 +6,8 @@
     "license": "MIT",
     "require": {
         "php": "^8.2",
+        "dedoc/scramble": "^0.13.10",
+        "doctrine/dbal": "^3.7",
         "guzzlehttp/guzzle": "^7.0",
         "laravel/framework": "^10.0",
         "laravel/sanctum": "^3.3",

@@ -30,10 +30,15 @@ class ProcessPrimeplayMessage implements ShouldQueue
 
     public function handle(): void
     {
-        Log::info('Processing Primeplay tracking message', [
+        $eventType = $this->messageData['eventType'] ?? $this->messageData['event_type'] ?? 'unknown';
+        $trackingId = $this->messageData['tracking_id'] ?? $this->messageData['datasetId'] ?? 'unknown';
+        
+        Log::info('START: Processing Tracking Message', [
+            'job' => 'ProcessPrimeplayMessage',
             'routing_key' => $this->routingKey,
-            'event_type' => $this->messageData['eventType'] ?? $this->messageData['event_type'] ?? 'unknown',
-            'received_at' => now()->toDateTimeString()
+            'event_type' => $eventType,
+            'tracking_id' => $trackingId,
+            'processing_started_at' => now()->toDateTimeString()
         ]);
 
         $eventType = $this->messageData['eventType'] ?? $this->messageData['event_type'] ?? null;

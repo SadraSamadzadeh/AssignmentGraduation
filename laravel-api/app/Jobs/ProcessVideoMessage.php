@@ -34,10 +34,15 @@ class ProcessVideoMessage implements ShouldQueue
 
     public function handle(): void
     {
-        Log::info('Processing video message', [
+        $eventType = $this->messageData['eventType'] ?? $this->messageData['event_type'] ?? 'unknown';
+        $videoId = $this->messageData['video_id'] ?? $this->messageData['videoId'] ?? $this->messageData['id'] ?? 'unknown';
+        
+        Log::info('START: Processing Video Message', [
+            'job' => 'ProcessVideoMessage',
             'routing_key' => $this->routingKey,
-            'event_type' => $this->messageData['eventType'] ?? $this->messageData['event_type'] ?? 'unknown',
-            'received_at' => now()->toDateTimeString()
+            'event_type' => $eventType,
+            'video_id' => $videoId,
+            'processing_started_at' => now()->toDateTimeString()
         ]);
 
         $eventType = $this->messageData['eventType'] ?? $this->messageData['event_type'] ?? null;

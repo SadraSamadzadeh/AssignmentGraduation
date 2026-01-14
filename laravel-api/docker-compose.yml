@@ -8,6 +8,8 @@ services:
             POSTGRES_DB: zipper_db
             POSTGRES_USER: zipper_user
             POSTGRES_PASSWORD: zipper_pass_2026
+            POSTGRES_HOST_AUTH_METHOD: md5
+            POSTGRES_INITDB_ARGS: "--auth-host=md5"
         ports:
             - "5432:5432"
         volumes:
@@ -22,8 +24,8 @@ services:
         image: rabbitmq:3-management-alpine
         container_name: zipper_rabbitmq
         environment:
-            RABBITMQ_DEFAULT_USER: zipper_admin
-            RABBITMQ_DEFAULT_PASS: zipper_rabbitmq_2026
+            RABBITMQ_DEFAULT_USER: admin
+            RABBITMQ_DEFAULT_PASS: admin
         ports:
             - "5672:5672"
             - "15672:15672"

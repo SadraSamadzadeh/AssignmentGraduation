@@ -77,7 +77,25 @@ RUN mkdir -p /etc/supervisor/conf.d /var/log/supervisor && \
     echo 'numprocs=2' >> /etc/supervisor/conf.d/supervisord.conf && \
     echo 'process_name=%(program_name)s_%(process_num)02d' >> /etc/supervisor/conf.d/supervisord.conf && \
     echo 'stdout_logfile=/var/log/supervisor/queue-worker.log' >> /etc/supervisor/conf.d/supervisord.conf && \
-    echo 'stderr_logfile=/var/log/supervisor/queue-worker-error.log' >> /etc/supervisor/conf.d/supervisord.conf
+    echo 'stderr_logfile=/var/log/supervisor/queue-worker-error.log' >> /etc/supervisor/conf.d/supervisord.conf && \
+    echo '' >> /etc/supervisor/conf.d/supervisord.conf && \
+    echo '[program:rabbitmq-consumer-primeplay]' >> /etc/supervisor/conf.d/supervisord.conf && \
+    echo 'command=php /var/www/html/artisan rabbitmq:consume-primeplay' >> /etc/supervisor/conf.d/supervisord.conf && \
+    echo 'autostart=true' >> /etc/supervisor/conf.d/supervisord.conf && \
+    echo 'autorestart=true' >> /etc/supervisor/conf.d/supervisord.conf && \
+    echo 'stdout_logfile=/dev/stdout' >> /etc/supervisor/conf.d/supervisord.conf && \
+    echo 'stdout_logfile_maxbytes=0' >> /etc/supervisor/conf.d/supervisord.conf && \
+    echo 'stderr_logfile=/dev/stderr' >> /etc/supervisor/conf.d/supervisord.conf && \
+    echo 'stderr_logfile_maxbytes=0' >> /etc/supervisor/conf.d/supervisord.conf && \
+    echo '' >> /etc/supervisor/conf.d/supervisord.conf && \
+    echo '[program:rabbitmq-consumer-video]' >> /etc/supervisor/conf.d/supervisord.conf && \
+    echo 'command=php /var/www/html/artisan rabbitmq:consume-video' >> /etc/supervisor/conf.d/supervisord.conf && \
+    echo 'autostart=true' >> /etc/supervisor/conf.d/supervisord.conf && \
+    echo 'autorestart=true' >> /etc/supervisor/conf.d/supervisord.conf && \
+    echo 'stdout_logfile=/dev/stdout' >> /etc/supervisor/conf.d/supervisord.conf && \
+    echo 'stdout_logfile_maxbytes=0' >> /etc/supervisor/conf.d/supervisord.conf && \
+    echo 'stderr_logfile=/dev/stderr' >> /etc/supervisor/conf.d/supervisord.conf && \
+    echo 'stderr_logfile_maxbytes=0' >> /etc/supervisor/conf.d/supervisord.conf
 
 RUN echo 'memory_limit = 256M' > /usr/local/etc/php/conf.d/custom.ini && \
     echo 'upload_max_filesize = 20M' >> /usr/local/etc/php/conf.d/custom.ini && \

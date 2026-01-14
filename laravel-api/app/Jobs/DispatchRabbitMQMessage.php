@@ -31,10 +31,17 @@ class DispatchRabbitMQMessage implements ShouldQueue
 
     public function handle(): void
     {
-        Log::channel('stack')->info('Message received at dispatcher', [
+        $eventType = $this->messageData['eventType'] ?? $this->messageData['event_type'] ?? 'unknown';
+        $messageSize = strlen(json_encode($this->messageData));
+        
+        Log::info('RabbitMQ Message Received', [
             'routing_key' => $this->routingKey,
-            'event_type' => $this->messageData['eventType'] ?? $this->messageData['event_type'] ?? 'unknown',
-            'received_at' => now()->toDateTimeString()
+            'event_type' => $eventType,
+            'message_size_bytes' => $messageSize,
+            'has_tracking_id' => isset($this->messageData['tracking_id']) || isset($this->messageData['datasetId']),
+            'has_video_id' => isset($this->messageData['video_id']) || isset($this->messageData['videoId']),
+            'timestamp' => now()->toDateTimeString(),
+            'message_keys' => array_keys($this->messageData)
         ]);
 
         // Route based on routing key first (preferred)
@@ -82,8 +89,13 @@ class DispatchRabbitMQMessage implements ShouldQueue
 
     protected function dispatchToTrackingHandler(): void
     {
-        Log::info('Dispatching to ProcessPrimeplayMessage', [
-            'routing_key' => $this->routingKey
+        $trackingId = $this->messageData['tracking_id'] ?? $this->messageData['datasetId'] ?? 'unknown';
+        
+        Log::info('Routing to Tracking Handler', [
+            'handler' => 'ProcessPrimeplayMessage',
+            'routing_key' => $this->routingKey,
+            'tracking_id' => $trackingId,
+            'event_type' => $this->messageData['eventType'] ?? $this->messageData['event_type'] ?? 'unknown'
         ]);
         
         ProcessPrimeplayMessage::dispatch($this->messageData, $this->routingKey);
@@ -91,8 +103,13 @@ class DispatchRabbitMQMessage implements ShouldQueue
 
     protected function dispatchToVideoHandler(): void
     {
-        Log::info('Dispatching to ProcessVideoMessage', [
-            'routing_key' => $this->routingKey
+        $videoId = $this->messageData['video_id'] ?? $this->messageData['videoId'] ?? 'unknown';
+        
+        Log::info('Routing to Video Handler', [
+            'handler' => 'ProcessVideoMessage',
+            'routing_key' => $this->routingKey,
+            'video_id' => $videoId,
+            'event_type' => $this->messageData['eventType'] ?? $this->messageData['event_type'] ?? 'unknown'
         ]);
         
         ProcessVideoMessage::dispatch($this->messageData, $this->routingKey);

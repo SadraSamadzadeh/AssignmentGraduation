@@ -17,6 +17,8 @@ class Kernel extends HttpKernel
         \Illuminate\Foundation\Http\Middleware\ValidatePostSize::class,
         \App\Http\Middleware\TrimStrings::class,
         \Illuminate\Foundation\Http\Middleware\ConvertEmptyStringsToNull::class,
+        \App\Http\Middleware\SecurityHeaders::class, // Security headers for all requests
+        \App\Http\Middleware\ForceHttps::class, // Enforce HTTPS in production
     ];
 
     /**
